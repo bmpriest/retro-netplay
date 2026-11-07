@@ -28,7 +28,7 @@ class SpruceTargets(unittest.TestCase):
     def test_menu_advertises_only_rc_families(self):
         devices = json.loads((ROOT/'launcher/spruce/config.json').read_text())['devices']
         self.assertEqual(set(devices), {'TRIMUI_A133P', 'TRIMUI_SMART_PRO_S', 'MIYOO_FLIP', 'MIYOO_A30',
-                                       'ANBERNIC_RGXX', 'RGB30', 'RGB20SX', 'MINILOONG_POCKET1'})
+                                       'MIYOO_MINI_FLIP', 'ANBERNIC_RGXX', 'DARKMOSS'})
 
     def test_real_launcher_routes_each_model_and_runtime(self):
         with tempfile.TemporaryDirectory() as directory:
