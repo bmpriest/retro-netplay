@@ -49,6 +49,7 @@ class SpruceTargets(unittest.TestCase):
             write('fake-python', '#!/bin/sh\nprintf "%s\\n" "$PLATFORM" "$NETPLAY_PYUI_DEVICE" "$PYSDL2_DLL_PATH" "${SDL_VIDEODRIVER:-}" "${SDL_AUDIODRIVER:-}" "$NETPLAY_ENGINE_LD_LIBRARY_PATH" "$*" > "$TEST_RESULT"\n', True)
             for library in ('libSDL2-2.0', 'libSDL2_image-2.0', 'libSDL2_ttf-2.0'):
                 write(f'App/PyUI/dll/{library}.so', 'fake SDL runtime')
+            write('spruce/scripts/asound-setup.sh', '#!/bin/sh\nprintf "%s\\n" "$1" > "$TEST_ASOUND"\n', True)
             write('spruce/flip/bin/MainUI', '#!/bin/sh\nprintf "%s\\n" "$PLATFORM" "$NETPLAY_PYUI_DEVICE" "$PYSDL2_DLL_PATH" "${SDL_VIDEODRIVER:-}" "${SDL_AUDIODRIVER:-}" "$NETPLAY_ENGINE_LD_LIBRARY_PATH" "$*" > "$TEST_RESULT"\n', True)
             for build in ('tg5040', 'tg5050', 'my355', 'h700', 'my282'):
                 write(f'App/Netplay/bin/{build}/netplay.elf', '#!/bin/sh\nexit 0\n', True)
@@ -57,7 +58,8 @@ class SpruceTargets(unittest.TestCase):
                     output = card/'result'
                     env = {**os.environ, 'SDCARD_PATH': str(card), 'TEST_MODEL': model,
                            'TEST_FAMILY': 'darkmoss' if model in DARKMOSS else '',
-                           'TEST_RESULT': str(output), 'NETPLAY_RUNTIME_ROOT': str(card/'runtime')}
+                           'TEST_RESULT': str(output), 'TEST_ASOUND': str(card/'asound'),
+                           'NETPLAY_RUNTIME_ROOT': str(card/'runtime')}
                     env.pop('SDL_VIDEODRIVER', None)
                     env.pop('SDL_AUDIODRIVER', None)
                     subprocess.run(['sh', str(app/'launch.sh')], env=env, check=True,
@@ -65,6 +67,7 @@ class SpruceTargets(unittest.TestCase):
                     values = output.read_text().splitlines()
                     self.assertEqual(values[:2], [build, identity])
                     self.assertEqual(values[-1], '-m spruce_ui')
+                    self.assertEqual((card/'asound').read_text(), f'{app}/nextui/.userdata/{build}\n')
                     if build == 'my355':
                         alias = card/'runtime/spruce-libs/libSDL2-2.0.so.0'
                         self.assertEqual(alias.resolve(), card/'App/PyUI/dll/libSDL2-2.0.so')

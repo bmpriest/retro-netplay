@@ -26,6 +26,7 @@ USERDATA_PATH="$DIR/nextui/.userdata/$PLATFORM"
 SHARED_USERDATA_PATH="$DIR/nextui/.userdata/shared"
 HOME="$USERDATA_PATH"
 export SYSTEM_PATH USERDATA_PATH SHARED_USERDATA_PATH HOME
+/mnt/SDCARD/spruce/scripts/asound-setup.sh "$HOME"
 PYUI_BASE_LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}
 LD_LIBRARY_PATH=$(np_spruce_engine_libraries) || {
 	[ "$1" = --env ] && exit 1
