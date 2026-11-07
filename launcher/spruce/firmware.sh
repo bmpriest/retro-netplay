@@ -21,10 +21,13 @@ np_spruce_platform() {
 		Brick|BrickPro|SmartPro) echo tg5040 ;;
 		SmartProS)               echo tg5050 ;;
 		Anbernic*)               echo h700 ;;
-		Flip|RGB30|RGB20SX|Miniloong) echo my355 ;;
-		A30|MIYOO_A30)               echo my282 ;;
-		MiyooMini)                   echo my285 ;;
-		*)                       return 1 ;;
+		Flip)                    echo my355 ;;
+		A30|MIYOO_A30)           echo my282 ;;
+		MiyooMini)               echo my285 ;;
+		*)
+			[ "${PLATFORM_FAMILY:-}" = darkmoss ] || return 1
+			echo my355
+			;;
 	esac
 }
 
