@@ -22,8 +22,10 @@ TARGETS = {
     'RGB30': ('my355', 'RGB30'),
     'RGB20SX': ('my355', 'RGB20SX'),
     'Miniloong': ('my355', 'MINILOONG_POCKET1'),
+    'A10MiniV4': ('my355', 'A10MINIV4'),
+    'G350': ('my355', 'G350'),
 }
-DARKMOSS = {'RGB30', 'RGB20SX', 'Miniloong'}
+DARKMOSS = {'RGB30', 'RGB20SX', 'Miniloong', 'A10MiniV4', 'G350'}
 
 class SpruceTargets(unittest.TestCase):
     def test_menu_advertises_only_rc_families(self):
@@ -42,7 +44,8 @@ class SpruceTargets(unittest.TestCase):
                 if executable: path.chmod(0o755)
             write('App/Netplay/launcher/firmware.sh', (ROOT/'launcher/spruce/firmware.sh').read_text())
             write('App/Netplay/launch.sh', (ROOT/'launcher/spruce/launch.sh').read_text().replace('/mnt/SDCARD', str(card)))
-            write('spruce/scripts/helperFunctions.sh', 'PLATFORM=$TEST_MODEL\nPLATFORM_FAMILY=$TEST_FAMILY\nget_python_path() { echo "$SDCARD_PATH/fake-python"; }\n')
+            write('spruce/scripts/helperFunctions.sh', 'PLATFORM=$TEST_MODEL\nPLATFORM_FAMILY=$TEST_FAMILY\nget_python_path() { echo "$SDCARD_PATH/fake-python"; }\n'
+                  'device_names() { case "$PLATFORM" in Miniloong) echo MINILOONG_POCKET1 ;; A10MiniV4) echo A10MINIV4 ;; *) echo "$PLATFORM" ;; esac; echo DARKMOSS; }\n')
             write('fake-python', '#!/bin/sh\nprintf "%s\\n" "$PLATFORM" "$NETPLAY_PYUI_DEVICE" "$PYSDL2_DLL_PATH" "${SDL_VIDEODRIVER:-}" "${SDL_AUDIODRIVER:-}" "$NETPLAY_ENGINE_LD_LIBRARY_PATH" "$*" > "$TEST_RESULT"\n', True)
             for library in ('libSDL2-2.0', 'libSDL2_image-2.0', 'libSDL2_ttf-2.0'):
                 write(f'App/PyUI/dll/{library}.so', 'fake SDL runtime')
@@ -66,7 +69,7 @@ class SpruceTargets(unittest.TestCase):
                         alias = card/'runtime/spruce-libs/libSDL2-2.0.so.0'
                         self.assertEqual(alias.resolve(), card/'App/PyUI/dll/libSDL2-2.0.so')
                         self.assertTrue(values[5].startswith(str(card/'runtime/spruce-libs') + ':'))
-                    if model in ('RGB30', 'RGB20SX', 'Miniloong'):
+                    if model in DARKMOSS:
                         self.assertEqual(values[3:5], ['kmsdrm', 'alsa'])
 
     def test_missing_rk3566_sdl_fails_instead_of_loading_fbdev(self):
