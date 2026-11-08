@@ -260,6 +260,28 @@ GBA multiplayer library. A game that used the serial cable and never supported
 the wireless adapter has nothing for the shim to carry, no matter how well the
 transport works. This is the main argument for the mGBA row below.
 
+**armGBA (spruce's default GBA and GB/GBC core) carries its own link
+modes.** Its **Separate** mode runs one console per device and speaks the
+netpacket interface, so the shim carries its cable (and Wireless Adapter)
+traffic exactly as it does gpSP's; its **Together** mode runs every
+console (two to four) on every device and expects the frontend to
+exchange controller inputs, which is the shim's shared-screen path. The
+mode is the core's own `armgba_link_mode` option: the launcher reads it
+from the frontend's option file and the shim follows it, answers the
+core's netplay client-index query (host 0, guest 1), and runs the
+built-in BIOS on both devices. Players should set Number of Players to
+the number of devices for netplay. On NextUI the core is not bundled;
+a pak that ships `armgba_libretro.so` is routed the same way. Both
+modes are device-proven on two spruce handhelds: Separate carried a
+full Advance Wars 2 turn exchange and Tetris and Super Mario Bros.
+Deluxe matches, Together kept Mario Kart, Tetris and Super Mario Bros.
+Deluxe in shared-screen sync at 60 fps. (Tetris DX's own link probe
+did not engage in Separate; the same games link in Together.) Exact
+GBA link timing floods progress grants, so the shim drains up to 512
+packets a frame and never freezes armGBA in its starved-link dialog:
+a blocked frame is the cable working, and the core's own timeout
+reports a peer that is really gone.
+
 **mGBA emulates GBA link properly, but not over libretro's netpacket
 interface.** Checked against the source rather than assumed: `libretro.c` at
 revision `925f0f0` (and `7a12d6d4b`, which NextUI 6.15.0 ships) contains no

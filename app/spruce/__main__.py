@@ -430,6 +430,8 @@ def core_rows(output: str) -> tuple[list[tuple[str, str, str, str]], dict[str, s
         detail = descriptions.get(tag, names.get(tag, tag))
         if tag == "GB": detail = "Gambatte" + (", Gambatte Dual" if paired else "")
         elif tag == "GBA": detail = "gpSP (Wireless Adapter, AW/Gen 3 Pkmn)" + (", mGBA Dual" if paired else "")
+        if descriptions.get(tag, "").lower() == "armgba":
+            detail = "armGBA (Link Mode in its core options: Separate links, Together shares)"
         rows.append((tag, label, detail, mark))
         available = values.get("gambatte_dual" if tag == "GB" else "mgba_dual") == "1"
         actions[tag] = "CHANGE" if tag in ("GB", "GBA") and more == "1" and available else None

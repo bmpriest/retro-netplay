@@ -734,7 +734,7 @@ bool NS_coreInstalled(const char* core) {
 /* Cores the shim drives, as install-stubs.sh's NETPLAY_CORES lists them. */
 static const char* const SHIM_CORES[] = {
 	"fceumm", "snes9x", "snes9x2005", "mednafen_supafaust",
-	"picodrive", "pcsx_rearmed", "gpsp", "gambatte",
+	"picodrive", "pcsx_rearmed", "gpsp", "gambatte", "armgba",
 };
 
 /* A launch.sh that names the system's core: Netplay's bind-mount wrapper
@@ -887,7 +887,7 @@ bool NS_pakRestore(NS_ManagedPak pak, bool restore_pak, bool saves, bool states,
  * scripts; a core absent here is simply never offered for sharing. */
 static const char* MANIFEST_CORES[] = {
 	"fceumm", "picodrive", "snes9x", "snes9x2005", "gambatte", "gpsp",
-	"mgba", "mednafen_supafaust", "pcsx_rearmed",
+	"mgba", "mednafen_supafaust", "pcsx_rearmed", "armgba",
 };
 
 uint32_t NS_runtimeGlibc(void) {

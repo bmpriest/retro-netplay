@@ -44,6 +44,11 @@ adapter is carried over the network. Two players.
 - **Game Boy Advance** (gpSP): the Wireless Adapter, plus gpSP's special cases
   for Pokémon generation III and Advance Wars 1 and 2. Other GBA multiplayer
   games are not reached by gpSP; see instanced mGBA below.
+- **armGBA** (spruce's default GBA/GB/GBC core): set its **Link Mode** core
+  option on both devices. **Separate** links one console per device over the
+  cable or Wireless Adapter — the full serial link, not just gpSP's titles.
+  **Together** runs every console on both devices with shared inputs. Set
+  Number of Players to the number of devices.
 
 Each device keeps its own save. Reset affects only the local console.
 

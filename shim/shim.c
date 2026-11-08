@@ -59,8 +59,12 @@
 #define STARTUP_NOTICE_MS  2000
 
 /* Bound on packets handed to the core per frame. Without a cap, a peer that
- * has raced ahead can starve the frame. */
-#define MAX_PACKETS_PER_FRAME 64
+ * has raced ahead can starve the frame. Sized for armGBA's exact link
+ * timing, whose leader grants progress many times per frame: at 64 the
+ * receiving core drained slower than the grants arrived, the transport
+ * queue filled, and both sides stalled. A frame's worth of receives is
+ * still bounded work - each is one small core callback. */
+#define MAX_PACKETS_PER_FRAME 512
 
 /* Frames of input delay for shared-screen netplay. Each frame buys ~16ms of
  * tolerance at the cost of the same in input lag. Measured RTT here averages
@@ -665,6 +669,9 @@ static const char* const host_decided_options[] = {
 	"gpsp_boot_mode", "gpsp_rtc", "gpsp_rtc_time_source", "gpsp_turbo_period",
 	"mgba_gb_model", "mgba_idle_optimization", "mgba_allow_opposing_directions",
 	"mgba_solar_sensor_level", "mgba_force_gbp",
+	"armgba_link_mode", "armgba_link_players", "armgba_link_port",
+	"armgba_gb_link_port", "armgba_gb_link_timing", "armgba_gb_model",
+	"armgba_cpu_clock", "armgba_clock_source", "armgba_clock_speed",
 };
 
 static bool option_is_host_decided(const char* key) {
@@ -681,6 +688,7 @@ static bool option_is_host_decided(const char* key) {
  * sessions keep running its values (ra_apply_peer_options). */
 static const struct { const char* key; const char* value; } builtin_firmware_options[] = {
 	{ "gpsp_bios",              "builtin"  },
+	{ "armgba_bios",            "open-source" },
 	{ "mgba_use_bios",          "OFF"      },
 	{ "gambatte_gb_bootloader", "disabled" },
 	{ "pcsx_rearmed_bios",      "HLE"      },
@@ -706,7 +714,7 @@ static bool set_option_override(const char* key, const char* value) {
 static void force_builtin_firmware(void) {
 	for (size_t i = 0; i < sizeof(builtin_firmware_options) / sizeof(builtin_firmware_options[0]); i++)
 		set_option_override(builtin_firmware_options[i].key, builtin_firmware_options[i].value);
-	shim_log("session runs built-in firmware: gpSP BIOS, mGBA BIOS, Gambatte boot ROM, "
+	shim_log("session runs built-in firmware: gpSP BIOS, armGBA BIOS, mGBA BIOS, Gambatte boot ROM, "
 	         "PCSX HLE BIOS, no Game Genie\n");
 }
 
@@ -880,6 +888,59 @@ static int core_is_mgba(void) {
 	memset(&info, 0, sizeof(info));
 	core.get_system_info(&info);
 	return info.library_name && contains_ci(info.library_name, "mgba");
+}
+
+static int core_is_armgba(void) {
+	struct retro_system_info info;
+	memset(&info, 0, sizeof(info));
+	core.get_system_info(&info);
+	return info.library_name && contains_ci(info.library_name, "armgba");
+}
+
+/* armGBA carries its own link modes (core option armgba_link_mode):
+ * "separate" runs one console per device and carries the cable over the
+ * netpacket interface (our link path); "together" runs every console on
+ * every device and expects the frontend to exchange controller inputs
+ * (our shared-screen path). "off"/"gamecube" need no input exchange, so
+ * they take the link path and simply never link. The user's core option
+ * is the source of truth; the launcher may pass it as
+ * NETPLAY_ARMGBA_LINK_MODE (read from the frontend's option file, which
+ * is settled before the core loads), a session armgba_link_mode= line
+ * comes next, and the frontend variable is the last resort. The
+ * default is separate: it is the mode that works with no input sync. */
+static const char* armgba_link_mode(const char* session_path) {
+	static char mode[32];
+	const char* env = getenv("NETPLAY_ARMGBA_LINK_MODE");
+	if (env && *env) {
+		snprintf(mode, sizeof(mode), "%s", env);
+		return mode;
+	}
+	if (session_path) {
+		FILE* f = fopen(session_path, "r");
+		if (f) {
+			char line[256];
+			while (fgets(line, sizeof(line), f)) {
+				if (!strncmp(line, "armgba_link_mode=", 17)) {
+					char* v = line + 17;
+					v[strcspn(v, "\r\n")] = '\0';
+					if (*v) {
+						snprintf(mode, sizeof(mode), "%s", v);
+						fclose(f);
+						return mode;
+					}
+				}
+			}
+			fclose(f);
+		}
+	}
+	if (fe_environment) {
+		struct retro_variable var = { "armgba_link_mode", NULL };
+		if (fe_environment(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value && *var.value) {
+			snprintf(mode, sizeof(mode), "%s", var.value);
+			return mode;
+		}
+	}
+	return "separate";
 }
 
 /*
@@ -1257,6 +1318,12 @@ static void ensure_loaded(void) {
 		// reach the same answer without having to negotiate it.
 		int override = session_mode_override(session);
 		netplay_mode = (override >= 0) ? override : !core_wants_link();
+		if (override < 0 && core_is_armgba()) {
+			const char* lm = armgba_link_mode(session);
+			netplay_mode = !strcmp(lm, "together") ? 1 : 0;
+			shim_log("armGBA link mode=%s -> %s\n", lm,
+			         netplay_mode ? "shared-screen (Together)" : "link-cable (Separate)");
+		}
 		ra_read_session(session);
 		if (ra_mode) {
 			/* RetroArch peers play shared screen; their link cores speak
@@ -1377,6 +1444,17 @@ static void shim_netpacket_poll_receive(void) {
 	static int in_delivery;
 	if (!netpacket_started || in_delivery) return;
 	in_delivery = 1;
+	/* A core may wait mid-frame for a reply (armGBA's exact link timing
+	 * polls until the other's transfer answer lands). If that answer is
+	 * queued behind a burst larger than this frame's budget, a hard cap
+	 * deadlocks both devices: the frame never ends, so the budget never
+	 * refills. Refill a little after a short sleep instead - delivery
+	 * stays rate-limited against a busy-polling core, but a waiting one
+	 * always makes progress. */
+	if (netpacket_budget <= 0) {
+		usleep(200);
+		netpacket_budget = 16;
+	}
 	deliver_packets();
 	in_delivery = 0;
 }
@@ -1465,6 +1543,16 @@ static bool shim_environment(unsigned cmd, void* data) {
 			shim_log("answering mGBA target sample rate: %u\n", rate);
 			return true;
 		}
+	}
+
+	/* RetroArch 1.22.3+ tells a core which netplay client this device is
+	 * (0 host, then joiners). armGBA uses it to assign each device its
+	 * console in Together mode and to run its netplay save handling.
+	 * We are the netplay, so answer it ourselves while a session is
+	 * armed; unarmed, forward so the core sees the stock answer. */
+	if (cmd == RETRO_ENVIRONMENT_GET_NETPLAY_CLIENT_INDEX && session_active && data) {
+		*(unsigned*)data = NetLink_getRole() == NETLINK_ROLE_CLIENT ? 1u : 0u;
+		return true;
 	}
 
 	if (cmd == RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE && session_active && data) {
@@ -5058,7 +5146,14 @@ void retro_run(void) {
 	    link_run_us > (uint32_t)link_starve_timeout_ms() * 1000u) {
 		shim_log("link starved: one core call blocked %ums while the peer was connected\n",
 		         link_run_us / 1000u);
-		recovery_fail("Other player's game stopped sending link data.");
+		/* armGBA's exact link timing waits inside a frame for the other
+		 * console the way a real cable does; a long block is the cable
+		 * working, and freezing this side in a recovery dialog would
+		 * guarantee the very failure it reports. Its own transfer
+		 * timeout lets the game show a linking error when the peer is
+		 * really gone, so only log ours. */
+		if (!core_is_armgba())
+			recovery_fail("Other player's game stopped sending link data.");
 	}
 }
 

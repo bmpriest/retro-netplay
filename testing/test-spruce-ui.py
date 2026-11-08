@@ -80,6 +80,12 @@ class MenuTests(unittest.TestCase):
         self.assertIsNone(actions['FC']);self.assertIsNone(actions['NDS'])
         self.assertEqual(actions['GB'],'CHANGE')
 
+    def test_core_rows_identify_armgba(self):
+        output='\n'.join(['core\tbase\tGBA\tGBA\tready\t0','core_hint\tGBA\tarmGBA'])
+        rows,_=ui.core_rows(output)
+        self.assertEqual(rows[0][2],'armGBA (Link Mode in its core options: Separate links, Together shares)')
+        self.assertEqual(rows[0][3],'✓')
+
     def test_core_names_follow_engine_metadata(self):
         rows,_=ui.core_rows('core\tbase\tSFC\tSFC\tready\t0\ncore_hint\tSFC\tSupafaust')
         self.assertEqual(rows[0][2],'Supafaust')

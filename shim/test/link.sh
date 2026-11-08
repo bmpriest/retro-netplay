@@ -256,6 +256,35 @@ else
 fi
 
 echo
+echo "== armGBA's long cable waits are logged, not failed"
+# armGBA's exact link timing blocks inside retro_run while the other
+# console catches up, as a real cable would. The watchdog must not
+# freeze it in the recovery dialog - only log the block.
+PORT20=$((PORT + 20))
+printf 'role=host\nport=%s\nmode=link\n'                  "$PORT20" > "$OUT/h20.session"
+printf 'role=client\nport=%s\npeer=127.0.0.1\nmode=link\n' "$PORT20" > "$OUT/c20.session"
+
+NETPLAY_LINK_STARVE_MS=500 \
+NETPLAY_REAL_CORE="$OUT/fake_libretro.so" NETPLAY_SESSION="$OUT/h20.session" \
+	"$OUT/harness" "$SHIM" 250 10 > "$OUT/h20.log" 2>&1 &
+H20=$!
+sleep 0.3
+NETPLAY_LINK_STARVE_MS=500 FAKE_CORE_NAME=armGBA FAKE_CORE_BLOCK_AT=100 FAKE_CORE_BLOCK_MS=1000 \
+NETPLAY_REAL_CORE="$OUT/fake_libretro.so" NETPLAY_SESSION="$OUT/c20.session" \
+	"$OUT/harness" "$SHIM" 250 10 > "$OUT/c20.log" 2>&1 &
+C20=$!
+wait $H20 2>/dev/null || true
+wait $C20 2>/dev/null || true
+
+expect "$OUT/c20.log" "link starved: one core call blocked" "armGBA block was logged"
+if grep -q "Other player's game stopped sending link data" "$OUT/c20.log"; then
+	echo "  MISS armGBA block reached the recovery dialog"
+	fail=1
+else
+	echo "  ok   armGBA block stayed out of the recovery dialog"
+fi
+
+echo
 echo "== menu still pauses the peer for a core that owns its own link"
 # gambatte never registers netpacket, but a menu on one device should still hold
 # the other - otherwise it sits blocked on a serial read with no idea why.
@@ -1208,6 +1237,32 @@ if [ "$(echo "$elapsed46 >= 3.3" | bc)" = 1 ]; then
 	echo "  ok   240 unthrottled calls took ${elapsed46}s"
 else
 	echo "  MISS 240 unthrottled calls took only ${elapsed46}s"
+	fail=1
+fi
+
+echo
+echo "== a mid-frame wait must outlive a burst bigger than the frame budget"
+# armGBA's exact link timing polls inside retro_run until the other's
+# answer arrives. If delivery stopped at the per-frame budget, the frame
+# could never end and both devices would deadlock - reproduce it with a
+# 200-packet burst and a waiter that only leaves when all of it arrived.
+PORT5=$((PORT + 4))
+printf 'role=host\nport=%s\nmode=link\n'                  "$PORT5" > "$OUT/h5.session"
+printf 'role=client\nport=%s\npeer=127.0.0.1\nmode=link\n' "$PORT5" > "$OUT/c5.session"
+FAKE_CORE_BURST=200 \
+NETPLAY_REAL_CORE="$OUT/fake_libretro.so" NETPLAY_SESSION="$OUT/h5.session" \
+	"$OUT/harness" "$SHIM" 120 15 > "$OUT/h5.log" 2>&1 &
+H5=$!
+sleep 0.5
+FAKE_CORE_BURST=200 FAKE_CORE_BURST_WAIT=1 \
+NETPLAY_REAL_CORE="$OUT/fake_libretro.so" NETPLAY_SESSION="$OUT/c5.session" \
+	"$OUT/harness" "$SHIM" 120 15 > "$OUT/c5.log" 2>&1 &
+C5=$!
+wait $H5 2>/dev/null || true
+wait $C5 2>/dev/null || true
+expect "$OUT/c5.log" "core:burst_wait_done" "client received the whole burst inside one frame"
+if grep -q "burst_wait_timeout" "$OUT/c5.log"; then
+	echo "  MISS mid-frame delivery stalled at the frame budget"
 	fail=1
 fi
 

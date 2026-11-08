@@ -45,6 +45,7 @@ static unsigned                       np_seq;
 
 static retro_netpacket_poll_receive_t np_poll_receive;
 static int np_in_receive;
+static unsigned np_rx_count;
 
 static void np_start(uint16_t client_id, retro_netpacket_send_t send_fn,
                      retro_netpacket_poll_receive_t poll_fn) {
@@ -56,6 +57,7 @@ static void np_start(uint16_t client_id, retro_netpacket_send_t send_fn,
 }
 
 static void np_receive(const void* buf, size_t len, uint16_t client_id) {
+	np_rx_count++;
 	printf("core:np_recv from=%u len=%zu data=%.*s\n",
 	       client_id, len, (int)len, (const char*)buf);
 	/* A core is allowed to poll from inside its own receive handler. The shim
@@ -264,6 +266,41 @@ void retro_run(void) {
 		char msg[32];
 		int n = snprintf(msg, sizeof(msg), "P%u-%u", np_local_id, np_seq++);
 		np_send(RETRO_NETPACKET_RELIABLE, msg, (size_t)n, RETRO_NETPACKET_BROADCAST);
+	}
+
+	/* FAKE_CORE_BURST=N: on the first linked frame, put N packets on the
+	 * wire at once - a burst bigger than any per-frame delivery budget.
+	 * FAKE_CORE_BURST_WAIT: then wait inside this same retro_run until the
+	 * peer's burst has all arrived, as armGBA's exact link timing waits
+	 * mid-frame for a transfer answer. Bounded, so a shim that stops
+	 * delivering mid-frame fails instead of hanging the suite. */
+	{
+		static int burst_done = 0;
+		const char* burst = getenv("FAKE_CORE_BURST");
+		if (np_started && np_send && burst && !burst_done) {
+			burst_done = 1;
+			int count = atoi(burst);
+			unsigned before = np_rx_count;
+			for (int i = 0; i < count; i++) {
+				char msg[32];
+				int n = snprintf(msg, sizeof(msg), "B%u-%d", np_local_id, i);
+				np_send(RETRO_NETPACKET_RELIABLE, msg, (size_t)n, RETRO_NETPACKET_BROADCAST);
+			}
+			if (getenv("FAKE_CORE_BURST_WAIT") && np_poll_receive) {
+				long waited_ms = 0;
+				while (np_rx_count - before < (unsigned)count && waited_ms < 4000) {
+					np_poll_receive();
+					if (np_rx_count - before >= (unsigned)count) break;
+					usleep(1000);
+					waited_ms++;
+				}
+				if (np_rx_count - before >= (unsigned)count)
+					printf("core:burst_wait_done got=%u\n", np_rx_count - before);
+				else
+					printf("core:burst_wait_timeout got=%u of %d\n", np_rx_count - before, count);
+				fflush(stdout);
+			}
+		}
 	}
 	cb_input_poll();
 	// The value the frontend returns has to survive the trip back through the

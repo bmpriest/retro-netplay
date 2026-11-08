@@ -94,6 +94,28 @@ grep -q "startup notice: Core builds differ. Desyncs may occur" "$OUT/mismatch-n
 	|| { echo "  MISS core mismatch startup notice"; fail=1; }
 
 echo
+echo "== armGBA link mode picks the shim path"
+printf 'role=host\nport=55993\n' > "$OUT/armgba.session"
+NETPLAY_REAL_CORE="$OUT/fake_libretro.so" NETPLAY_SESSION="$OUT/armgba.session" \
+	FAKE_CORE_NAME=armGBA NETPLAY_ARMGBA_LINK_MODE=separate \
+	"$OUT/harness" "$SHIM" > "$OUT/armgba-separate" 2>&1 || {
+	cat "$OUT/armgba-separate"; echo "  MISS armGBA separate run"; fail=1
+}
+grep -q "armGBA link mode=separate -> link-cable (Separate)" "$OUT/armgba-separate" \
+	&& grep -q "mode=link-cable for armGBA" "$OUT/armgba-separate" \
+	&& echo "  ok   Separate carries the cable (link mode)" \
+	|| { echo "  MISS armGBA Separate"; cat "$OUT/armgba-separate"; fail=1; }
+NETPLAY_REAL_CORE="$OUT/fake_libretro.so" NETPLAY_SESSION="$OUT/armgba.session" \
+	FAKE_CORE_NAME=armGBA NETPLAY_ARMGBA_LINK_MODE=together \
+	"$OUT/harness" "$SHIM" > "$OUT/armgba-together" 2>&1 || {
+	cat "$OUT/armgba-together"; echo "  MISS armGBA together run"; fail=1
+}
+grep -q "armGBA link mode=together -> shared-screen (Together)" "$OUT/armgba-together" \
+	&& grep -q "mode=shared-screen for armGBA" "$OUT/armgba-together" \
+	&& echo "  ok   Together shares inputs (shared-screen mode)" \
+	|| { echo "  MISS armGBA Together"; cat "$OUT/armgba-together"; fail=1; }
+
+echo
 echo "== fails loudly with no real core"
 if NETPLAY_REAL_CORE= "$OUT/harness" "$SHIM" >"$OUT/nocore" 2>&1; then
 	echo "  MISS expected non-zero exit"

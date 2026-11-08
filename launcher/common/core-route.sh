@@ -98,6 +98,23 @@ np_route_core() {
 				CORE_NOTICE=paired
 			fi
 			;;
+		armgba)
+			# armGBA's own Link Mode option picks the shim's path:
+			# Separate carries its cable over netpacket, Together
+			# shares inputs. The frontend's option file is settled
+			# before the core loads, so read it here; the shim falls
+			# back to the frontend variable, then to Separate.
+			if [ -z "$NETPLAY_ARMGBA_LINK_MODE" ]; then
+				for _opt in \
+					"$SDCARD_PATH/RetroArch/.retroarch/config/armGBA/armGBA.opt" \
+					"$SDCARD_PATH/RetroArch/.retroarch/retroarch-core-options.cfg"; do
+					[ -f "$_opt" ] || continue
+					NETPLAY_ARMGBA_LINK_MODE="$(sed -n 's/^armgba_link_mode *= *"\(.*\)".*/\1/p' "$_opt" | head -n 1)"
+					[ -n "$NETPLAY_ARMGBA_LINK_MODE" ] && break
+				done
+				[ -n "$NETPLAY_ARMGBA_LINK_MODE" ] && export NETPLAY_ARMGBA_LINK_MODE
+			fi
+			;;
 	esac
 	if [ "$NETPLAY_DUAL_CORE" != "1" ] && [ -n "$NETPLAY_SESSION" ] &&
 	   grep -q "^compat_core\.$CORE_ID=1$" "$NETPLAY_SESSION" 2>/dev/null &&

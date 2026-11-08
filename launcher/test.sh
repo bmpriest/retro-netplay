@@ -671,5 +671,29 @@ grep -q '^/Roms/.Netplay (NETPLAY)/Netplay' "$RECENTS" \
 	&& ok "disabled redirect removed" || bad "disabled redirect remains"
 
 echo
+echo "== armGBA link mode is read from the frontend's option file"
+mkdir -p "$ROOT/RetroArch/.retroarch/config/armGBA"
+printf 'armgba_link_mode = "together"\narmgba_link_players = "2"\n' \
+	> "$ROOT/RetroArch/.retroarch/config/armGBA/armGBA.opt"
+ARMGBA_MODE=$(
+	NETPLAY_SESSION="$STATE/session"
+	. "$NP/launcher/core-route.sh"
+	np_route_core "$ROOT/RetroArch/.retroarch/cores64/armgba_libretro.so"
+	printf '%s' "$NETPLAY_ARMGBA_LINK_MODE"
+)
+check "armGBA Together reaches the shim" "$ARMGBA_MODE" "together"
+printf 'armgba_link_mode = "separate"\n' \
+	> "$ROOT/RetroArch/.retroarch/config/armGBA/armGBA.opt"
+ARMGBA_MODE=$(
+	NETPLAY_SESSION="$STATE/session"
+	NETPLAY_ARMGBA_LINK_MODE=
+	. "$NP/launcher/core-route.sh"
+	np_route_core "$ROOT/RetroArch/.retroarch/cores64/armgba_libretro.so"
+	printf '%s' "$NETPLAY_ARMGBA_LINK_MODE"
+)
+check "armGBA Separate reaches the shim" "$ARMGBA_MODE" "separate"
+rm -rf "$ROOT/RetroArch"
+
+echo
 [ "$fail" -eq 0 ] && echo "PASS" || echo "FAIL"
 exit $fail

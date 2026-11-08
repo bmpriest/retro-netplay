@@ -534,6 +534,7 @@ static const char* core_name(const char* core) {
 		{ "snes9x", "Snes9x" }, { "snes9x2005", "Snes9x 2005" },
 		{ "mednafen_supafaust", "Supafaust" },
 		{ "mgba", "mGBA" }, { "dsperate", "DSperate" }, { "drastic", "DraStic" },
+		{ "armgba", "armGBA" },
 	};
 	for (size_t i = 0; i < sizeof(NAMES) / sizeof(NAMES[0]); i++)
 		if (!strcmp(core, NAMES[i].id)) return NAMES[i].name;

@@ -2,7 +2,7 @@
 # Shared bind-mount primitives for system and SD-card emulator paks.
 # Callers set MOUNT_STAGE before using ownership or staleness helpers.
 
-NETPLAY_CORES="fceumm snes9x snes9x2005 mednafen_supafaust picodrive pcsx_rearmed gpsp gambatte"
+NETPLAY_CORES="fceumm snes9x snes9x2005 mednafen_supafaust picodrive pcsx_rearmed gpsp gambatte armgba"
 MOUNTS_FILE="${NETPLAY_MOUNTS_FILE:-/proc/mounts}"
 MOUNTINFO_FILE="${NETPLAY_MOUNTINFO_FILE:-/proc/self/mountinfo}"
 

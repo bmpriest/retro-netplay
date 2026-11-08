@@ -49,7 +49,7 @@ done
 case "$(basename "$CORE")" in
 	fceumm_libretro.so|snes9x_libretro.so|snes9x2005_libretro.so|\
 	mednafen_supafaust_libretro.so|picodrive_libretro.so|pcsx_rearmed_libretro.so|\
-	gpsp_libretro.so|gambatte_libretro.so|mgba_libretro.so) ;;
+	gpsp_libretro.so|gambatte_libretro.so|mgba_libretro.so|armgba_libretro.so) ;;
 	*) PLATFORM="$SPRUCE_PLATFORM" exec "$REAL_RA" "$@" ;;
 esac
 

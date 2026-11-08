@@ -62,6 +62,7 @@ Invitations received during gameplay are ignored.
 | PCSX ReARMed | PlayStation | Shared screen; cross-architecture determinism remains limited |
 | Gambatte | GB/GBC | Ordinary Game Link or optional Gambatte Dual |
 | gpSP | GBA | Wireless Adapter, Advance Wars 1/2 and generation III Pokémon |
+| armGBA | GBA, GB/GBC (spruce's default) | Its own Link Mode: Separate (link cable/Wireless Adapter) or Together (shared inputs) |
 | mGBA Dual | GBA | Emulates both linked consoles locally; experimental |
 | DraStic / DSperate | NDS | Local wireless; experimental, no Download Play coverage |
 
