@@ -1097,6 +1097,32 @@ static void apply_required_options(void) {
  * desync rather than an override. */
 static int input_delay_pinned;
 
+/* Test override (session line relaxed_core_identity=1, or the environment
+ * variable NETPLAY_RELAXED_CORE_IDENTITY=1): leave the core's version string
+ * out of its identity, so two builds of one core that report different
+ * versions - spruce's 32-bit and 64-bit cores are separate revisions - may
+ * meet. Name, state size, SRAM/RTC sizes and the ROM must still agree, and
+ * divergence checking is unchanged: it exists to measure whether such builds
+ * really stay in step. Both devices must set it, or the identities differ. */
+static int relaxed_core_identity = -1;
+
+static bool relaxed_identity(void) {
+	if (relaxed_core_identity >= 0) return relaxed_core_identity;
+	const char* env = getenv("NETPLAY_RELAXED_CORE_IDENTITY");
+	relaxed_core_identity = env && env[0] == '1';
+	const char* path = getenv(SHIM_ENV_SESSION);
+	FILE* f = (!relaxed_core_identity && path && path[0]) ? fopen(path, "r") : NULL;
+	if (f) {
+		char line[256];
+		while (fgets(line, sizeof(line), f))
+			if (!strncmp(line, "relaxed_core_identity=1", 23)) relaxed_core_identity = 1;
+		fclose(f);
+	}
+	if (relaxed_core_identity)
+		shim_log("TEST: relaxed core identity - version strings are not compared\n");
+	return relaxed_core_identity;
+}
+
 static int session_input_delay(const char* path) {
 	FILE* f = fopen(path, "r");
 	if (!f) return INPUT_DELAY_DEFAULT;
@@ -1843,7 +1869,7 @@ static uint32_t core_identity_logged(bool log) {
 
 	uint32_t h = 2166136261u;
 	const char* parts[2] = { info.library_name, info.library_version };
-	for (int i = 0; i < 2; i++)
+	for (int i = 0; i < (relaxed_identity() ? 1 : 2); i++)
 		for (const char* p = parts[i]; p && *p; p++) { h ^= (uint8_t)*p; h *= 16777619u; }
 
 	/* Serialize size differs between builds far more often than the version
