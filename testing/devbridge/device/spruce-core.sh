@@ -17,6 +17,8 @@ EMU=$2
 CFG=/mnt/SDCARD/Emu/$EMU/config.json
 SAVED=/tmp/netplay-devbridge/spruce-core-$EMU
 JQ=/mnt/SDCARD/spruce/bin64/jq
+# bin64/jq exists on the A30 too, but it is a 64-bit binary there: probe it.
+"$JQ" --version >/dev/null 2>&1 || JQ=/mnt/SDCARD/spruce/bin/jq
 
 case $1 in
 set)

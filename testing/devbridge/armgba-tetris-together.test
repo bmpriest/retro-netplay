@@ -1,0 +1,39 @@
+# Tetris - armGBA Together link mode (shared screen: one console, the guest
+# is player 2 on it). The host drives the menus; both players pick their own
+# handicap height, then both play. Judged by check.sh shared.
+
+all:WAIT_FOR devbridge 30000
+#spruce all:TRM sh {helpers}/spruce-core.sh set GB "Tetris (World) (Rev 1).zip" armgba
+#spruce all:TRM sh -c "mkdir -p /mnt/SDCARD/RetroArch/.retroarch/config/armGBA && printf 'armgba_link_mode = \"together\"\n' > /mnt/SDCARD/RetroArch/.retroarch/config/armGBA/armGBA.opt"
+host:OPEN_GAME GB "Game Boy (GB)/Tetris (World) (Rev 1).zip"
+WAIT 3000
+guest:OPEN_GAME GB "Game Boy (GB)/Tetris (World) (Rev 1).zip"
+all:WAIT_FOR game 30000
+WAIT 10000
+
+# Host alone past the title: 2PLAYER on the shared console.
+#spruce host:TRM sh {helpers}/keys.sh --bg b:0.3:2 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 start:0.3:0
+WAIT 9000
+all:SCREEN armgba-tetris-tog-music
+
+host:TRM sh {helpers}/keys.sh start:0.3:3
+WAIT 3000
+all:SCREEN armgba-tetris-tog-vs
+
+# Player 1 (host pad) height 1, player 2 (guest pad) height 2.
+host:TRM sh {helpers}/keys.sh --bg right:0.2:1.2 a:0.2:0
+guest:TRM sh {helpers}/keys.sh --bg right:0.2:0.4 right:0.2:0.4 a:0.2:0
+WAIT 3000
+host:TRM sh {helpers}/keys.sh start:0.2:3
+
+host:TRM sh {helpers}/gameplay.sh --bg 60 left right left right a b a down
+guest:TRM sh {helpers}/gameplay.sh --bg 60 left right left right a b a down
+WAIT 63000
+all:SCREEN armgba-tetris-tog-after
+
+host:TRM sh {helpers}/check.sh shared Tetris 40
+guest:TRM sh {helpers}/check.sh shared Tetris 40
+
+all:TRM sh {helpers}/quit.sh minarch
+#spruce all:TRM sh {helpers}/spruce-core.sh restore GB
+all:WAIT_FOR devbridge 30000

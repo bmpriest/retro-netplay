@@ -37,11 +37,18 @@ fi
 # walk the device through NextUI or toggle DevBridge's own settings. On spruce
 # both spruce's menu and DevBridge's are PyUI (mainui.py).
 in_menu() {
+	# A game in front means keys go to the game, even where the menu
+	# process stays resident during play: spruce on the A30 keeps PyUI's
+	# MainUI (mainui.py) alive under the game, so its command line alone
+	# proves nothing. Only a menu with no game under it refuses.
 	# Brackets keep grep from finding its own command line.
-	grep -qs -e 'nextui[.]elf' -e 'DevBridge[.]pak/launch[.]sh' -e 'mainui[.]py' /proc/[0-9]*/cmdline
+	grep -qs -e 'RetroArch/ra' -e 'netplay/ra/' -e 'minarch[.]elf' \
+		${KEYS_PROC_ROOT:-/proc}/[0-9]*/cmdline && return 1
+	grep -qs -e 'nextui[.]elf' -e 'DevBridge[.]pak/launch[.]sh' -e 'mainui[.]py' \
+		${KEYS_PROC_ROOT:-/proc}/[0-9]*/cmdline
 }
 
-IN=$(ls /mnt/SDCARD/Tools/*/DevBridge.pak/bin/input /mnt/SDCARD/App/DevBridge/bin/input 2>/dev/null | head -1)
+IN=${KEYS_IN:-$(ls /mnt/SDCARD/Tools/*/DevBridge.pak/bin/input /mnt/SDCARD/App/DevBridge/bin/input 2>/dev/null | head -1)}
 [ -x "$IN" ] || { echo "keys.sh: DevBridge input helper not found" >&2; exit 1; }
 
 # On spruce every event is its own sendevent process, about 60 ms on an

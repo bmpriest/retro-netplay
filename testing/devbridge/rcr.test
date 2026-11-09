@@ -23,7 +23,11 @@ host:TRM sh {helpers}/keys.sh start:0.3:2.5 start:0.3:3
 all:SCREEN rcr-title
 host:TRM sh {helpers}/keys.sh start:0.3:3
 all:SCREEN rcr-play
-host:VERIFY_WAIT {host_refs}/rcr-two-player.png 10000 region=0.08,0.02,0.16,0.06
+# A Start can land in a link stall and go unseen (the A30 host ended a step
+# short, on SLICK's letter). Each further Start moves one screen on - letter,
+# title, game - and the check comes first, so none reaches the game itself,
+# where Start pauses.
+host:VERIFY_UNTIL {host_refs}/rcr-two-player.png 20000 every=4000 region=0.08,0.02,0.16,0.06 :: sh {helpers}/keys.sh start:0.3:0
 host:VERIFY_WAIT {host_refs}/rcr-two-player.png 10000 region=0.51,0.02,0.16,0.06
 guest:VERIFY_WAIT {guest_refs}/rcr-two-player.png 10000 region=0.08,0.02,0.16,0.06
 guest:VERIFY_WAIT {guest_refs}/rcr-two-player.png 10000 region=0.51,0.02,0.16,0.06

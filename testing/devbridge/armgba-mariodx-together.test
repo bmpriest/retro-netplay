@@ -1,0 +1,38 @@
+# Super Mario Bros. Deluxe - armGBA Together link mode (shared screen:
+# one console, guest pad is player 2). The host drives the menus to the
+# VS race; both pads play. Judged by check.sh shared.
+
+all:WAIT_FOR devbridge 30000
+#spruce all:TRM sh {helpers}/spruce-core.sh set GBC "Super Mario Bros. Deluxe (USA, Europe) (Rev 2).zip" armgba
+#spruce all:TRM sh -c "mkdir -p /mnt/SDCARD/RetroArch/.retroarch/config/armGBA && printf 'armgba_link_mode = \"together\"\n' > /mnt/SDCARD/RetroArch/.retroarch/config/armGBA/armGBA.opt"
+host:OPEN_GAME GBC "Game Boy Color (GBC)/Super Mario Bros. Deluxe (USA, Europe) (Rev 2).zip"
+WAIT 3000
+guest:OPEN_GAME GBC "Game Boy Color (GBC)/Super Mario Bros. Deluxe (USA, Europe) (Rev 2).zip"
+all:WAIT_FOR game 30000
+WAIT 15000
+
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 1200
+host:TRM sh {helpers}/keys.sh --bg down:0.25:0
+WAIT 1500
+host:TRM sh {helpers}/keys.sh --bg down:0.25:0
+WAIT 1500
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 2500
+all:SCREEN armgba-mariodx-tog-vs
+
+host:TRM sh {helpers}/keys.sh a:0.25:0
+WAIT 3000
+all:SCREEN armgba-mariodx-tog-race
+
+host:TRM sh {helpers}/gameplay.sh --bg 90 right right right+a right+b right+a+b left a b right
+guest:TRM sh {helpers}/gameplay.sh --bg 90 right right right+a right+b right+a+b left a b right
+WAIT 93000
+all:SCREEN armgba-mariodx-tog-after
+
+host:TRM sh {helpers}/check.sh shared Deluxe 40
+guest:TRM sh {helpers}/check.sh shared Deluxe 40
+
+all:TRM sh {helpers}/quit.sh minarch
+#spruce all:TRM sh {helpers}/spruce-core.sh restore GBC
+all:WAIT_FOR devbridge 30000

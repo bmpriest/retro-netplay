@@ -1,0 +1,68 @@
+# Mario Kart: Super Circuit - armGBA Separate link mode (Multi-Pak link,
+# one console per device). Menu flow from mkart.test without its screenshot
+# checks; judged by check.sh link on the shim logs.
+
+all:WAIT_FOR devbridge 30000
+#spruce all:TRM sh {helpers}/spruce-core.sh set GBA "Mario Kart - Super Circuit (USA).zip" armgba
+#spruce all:TRM sh -c "mkdir -p /mnt/SDCARD/RetroArch/.retroarch/config/armGBA && printf 'armgba_link_mode = \"separate\"\n' > /mnt/SDCARD/RetroArch/.retroarch/config/armGBA/armGBA.opt"
+host:OPEN_GAME GBA "Game Boy Advance (GBA)/Mario Kart - Super Circuit (USA).zip"
+WAIT 3000
+guest:OPEN_GAME GBA "Game Boy Advance (GBA)/Mario Kart - Super Circuit (USA).zip"
+all:WAIT_FOR game 30000
+WAIT 8000
+all:SCREEN armgba-mk-sep-title
+
+# MULTI-PLAYER, on both.
+host:TRM sh {helpers}/keys.sh --bg down:0.25:0.8 a:0.25:0
+guest:TRM sh {helpers}/keys.sh --bg down:0.25:0.8 a:0.25:0
+WAIT 4000
+
+# MULTI-PAK LINK.
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+guest:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 6000
+all:SCREEN armgba-mk-sep-link
+
+WAIT 4000
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+guest:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 4000
+
+# Player 1 picks VS, then 100cc; the guest's console follows over the link.
+host:TRM sh {helpers}/keys.sh down:0.25:1 a:0.25:4
+WAIT 2000
+host:TRM sh {helpers}/keys.sh down:0.25:0.8 a:0.25:4
+WAIT 2000
+all:SCREEN armgba-mk-sep-character
+
+# Host Mario, guest Yoshi.
+host:TRM sh {helpers}/keys.sh --bg up:0.25:0.6 left:0.25:0.6 a:0.25:0
+guest:TRM sh {helpers}/keys.sh --bg right:0.25:0.6 a:0.25:0
+WAIT 3000
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+guest:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 3000
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+guest:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 3000
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+guest:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 2000
+all:SCREEN armgba-mk-sep-track
+
+# Mushroom Cup, then Peach Circuit.
+host:TRM sh {helpers}/keys.sh a:0.25:2
+WAIT 3000
+host:TRM sh {helpers}/keys.sh a:0.25:3 a:0.25:8
+
+host:TRM sh {helpers}/gameplay.sh --bg 90 a a a a+left a+right a+left a+right a+r a+l a+up
+guest:TRM sh {helpers}/gameplay.sh --bg 90 a a a a+left a+right a+left a+right a+r a+l a+up
+WAIT 93000
+all:SCREEN armgba-mk-sep-after
+
+host:TRM sh {helpers}/check.sh link Mario_Kart 40
+guest:TRM sh {helpers}/check.sh link Mario_Kart 40
+
+all:TRM sh {helpers}/quit.sh minarch
+#spruce all:TRM sh {helpers}/spruce-core.sh restore GBA
+all:WAIT_FOR devbridge 30000

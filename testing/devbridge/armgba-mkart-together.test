@@ -1,0 +1,44 @@
+# Mario Kart: Super Circuit - armGBA Together link mode (shared screen:
+# one console, guest pad is player 2). The host starts a single-player
+# Grand Prix race; both pads drive. Judged by check.sh shared.
+
+all:WAIT_FOR devbridge 30000
+#spruce all:TRM sh {helpers}/spruce-core.sh set GBA "Mario Kart - Super Circuit (USA).zip" armgba
+#spruce all:TRM sh -c "mkdir -p /mnt/SDCARD/RetroArch/.retroarch/config/armGBA && printf 'armgba_link_mode = \"together\"\n' > /mnt/SDCARD/RetroArch/.retroarch/config/armGBA/armGBA.opt"
+host:OPEN_GAME GBA "Game Boy Advance (GBA)/Mario Kart - Super Circuit (USA).zip"
+WAIT 3000
+guest:OPEN_GAME GBA "Game Boy Advance (GBA)/Mario Kart - Super Circuit (USA).zip"
+all:WAIT_FOR game 30000
+WAIT 8000
+all:SCREEN armgba-mk-tog-title
+
+# SINGLE PLAYER (top entry) -> GRAND PRIX.
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 3000
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 3000
+# 100cc is the middle entry.
+host:TRM sh {helpers}/keys.sh --bg down:0.25:0.8 a:0.25:0
+WAIT 3000
+# Mario is the default character.
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 3000
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 3000
+# Mushroom Cup, then Peach Circuit.
+host:TRM sh {helpers}/keys.sh a:0.25:2
+WAIT 2000
+host:TRM sh {helpers}/keys.sh a:0.25:3 a:0.25:8
+all:SCREEN armgba-mk-tog-race
+
+host:TRM sh {helpers}/gameplay.sh --bg 90 a a a a+left a+right a+left a+right a+r a+l a+up
+guest:TRM sh {helpers}/gameplay.sh --bg 90 a a a a+left a+right a+left a+right a+r a+l a+up
+WAIT 93000
+all:SCREEN armgba-mk-tog-after
+
+host:TRM sh {helpers}/check.sh shared Mario_Kart 40
+guest:TRM sh {helpers}/check.sh shared Mario_Kart 40
+
+all:TRM sh {helpers}/quit.sh minarch
+#spruce all:TRM sh {helpers}/spruce-core.sh restore GBA
+all:WAIT_FOR devbridge 30000

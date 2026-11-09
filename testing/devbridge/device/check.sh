@@ -19,11 +19,14 @@ fail() { echo "FAIL: $*"; exit 1; }
 
 log=$(ls -t $(find /mnt/SDCARD/.userdata/*/logs/netplay-games /mnt/SDCARD/Saves/netplay/logs/netplay-games -name '*.log' -newer "$MARK" 2>/dev/null) 2>/dev/null |
 	grep -F "$ROM" | head -1)
-[ -n "$log" ] || fail "no netplay log for $ROM since this test started"
+[ -n "$log" ] || fail "no netplay log for $ROM since this test started (per-game logs need: ctl.sh set verbose_logs 1)"
 echo "log: $log"
 
 # Correctness first: any of these means the consoles parted ways.
-bad=$(grep -iE 'disagree|diverg|desync|synchronization timed out|could not adopt|ra: frame .*crc [1-9][0-9]* bad of' "$log" | head -3)
+# The player-facing startup notice ("Core builds differ. Desyncs may occur")
+# is a warning shown before play, not a desync: judge the session itself.
+bad=$(grep -v 'startup notice: ' "$log" |
+	grep -iE 'disagree|diverg|desync|synchronization timed out|could not adopt|ra: frame .*crc [1-9][0-9]* bad of' | head -3)
 [ -z "$bad" ] || fail "$bad"
 bad=$(grep -iE 'continued this game solo|host disconnected|Peer disconnected|Peer unavailable|Core cannot save state|recovery failed' "$log" | head -3)
 [ -z "$bad" ] || fail "$bad"

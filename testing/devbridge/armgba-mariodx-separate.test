@@ -1,0 +1,38 @@
+# Super Mario Bros. Deluxe - armGBA Separate link mode (GBC VS race).
+# Menu flow from mariodx.test without its screenshot checks; judged by
+# check.sh link on the shim logs.
+
+all:WAIT_FOR devbridge 30000
+#spruce all:TRM sh {helpers}/spruce-core.sh set GBC "Super Mario Bros. Deluxe (USA, Europe) (Rev 2).zip" armgba
+#spruce all:TRM sh -c "mkdir -p /mnt/SDCARD/RetroArch/.retroarch/config/armGBA && printf 'armgba_link_mode = \"separate\"\n' > /mnt/SDCARD/RetroArch/.retroarch/config/armGBA/armGBA.opt"
+host:OPEN_GAME GBC "Game Boy Color (GBC)/Super Mario Bros. Deluxe (USA, Europe) (Rev 2).zip"
+WAIT 3000
+guest:OPEN_GAME GBC "Game Boy Color (GBC)/Super Mario Bros. Deluxe (USA, Europe) (Rev 2).zip"
+all:WAIT_FOR game 30000
+WAIT 15000
+
+all:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 1200
+all:TRM sh {helpers}/keys.sh --bg down:0.25:0
+WAIT 1500
+all:TRM sh {helpers}/keys.sh --bg down:0.25:0
+WAIT 1500
+all:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 2500
+all:SCREEN armgba-mariodx-sep-vs
+
+host:TRM sh {helpers}/keys.sh a:0.25:0
+WAIT 3000
+all:SCREEN armgba-mariodx-sep-race
+
+host:TRM sh {helpers}/gameplay.sh --bg 90 right right right+a right+b right+a+b left a b right
+guest:TRM sh {helpers}/gameplay.sh --bg 90 right right right+a right+b right+a+b left a b right
+WAIT 93000
+all:SCREEN armgba-mariodx-sep-after
+
+host:TRM sh {helpers}/check.sh link Deluxe 40
+guest:TRM sh {helpers}/check.sh link Deluxe 40
+
+all:TRM sh {helpers}/quit.sh minarch
+#spruce all:TRM sh {helpers}/spruce-core.sh restore GBC
+all:WAIT_FOR devbridge 30000

@@ -1,0 +1,41 @@
+# Tetris - armGBA Separate link mode (one console per device, cable over
+# netpacket). Same menu flow as tetris.test; judged by check.sh link on the
+# shim logs, not screenshots, so it runs on platforms without references.
+#
+# spruce-core picks armgba for this ROM on both devices; the core option
+# file selects Separate before the core loads. Both are put back after.
+
+all:WAIT_FOR devbridge 30000
+#spruce all:TRM sh {helpers}/spruce-core.sh set GB "Tetris (World) (Rev 1).zip" armgba
+#spruce all:TRM sh -c "mkdir -p /mnt/SDCARD/RetroArch/.retroarch/config/armGBA && printf 'armgba_link_mode = \"separate\"\n' > /mnt/SDCARD/RetroArch/.retroarch/config/armGBA/armGBA.opt"
+host:OPEN_GAME GB "Game Boy (GB)/Tetris (World) (Rev 1).zip"
+WAIT 3000
+guest:OPEN_GAME GB "Game Boy (GB)/Tetris (World) (Rev 1).zip"
+all:WAIT_FOR game 30000
+WAIT 10000
+
+#spruce host:TRM sh {helpers}/keys.sh --bg b:0.3:2 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 start:0.3:0
+#spruce guest:TRM sh {helpers}/keys.sh --bg b:0.3:2 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 sleep:0.6 start:0.3:0
+WAIT 9000
+all:SCREEN armgba-tetris-sep-music
+
+host:TRM sh {helpers}/keys.sh start:0.3:3
+WAIT 3000
+all:SCREEN armgba-tetris-sep-vs
+
+host:TRM sh {helpers}/keys.sh --bg right:0.2:1.2 a:0.2:0
+guest:TRM sh {helpers}/keys.sh --bg right:0.2:0.4 right:0.2:0.4 a:0.2:0
+WAIT 3000
+host:TRM sh {helpers}/keys.sh start:0.2:3
+
+host:TRM sh {helpers}/gameplay.sh --bg 60 left right left right a b a down
+guest:TRM sh {helpers}/gameplay.sh --bg 60 left right left right a b a down
+WAIT 63000
+all:SCREEN armgba-tetris-sep-after
+
+host:TRM sh {helpers}/check.sh link Tetris 40
+guest:TRM sh {helpers}/check.sh link Tetris 40
+
+all:TRM sh {helpers}/quit.sh minarch
+#spruce all:TRM sh {helpers}/spruce-core.sh restore GB
+all:WAIT_FOR devbridge 30000

@@ -5,6 +5,8 @@
 #   run.sh [options] HOST_ADDR GUEST_ADDR TEST...
 #
 #   --record        capture reference screens instead of checking them
+#   --record-only P only keep the recorded refs of platform P (spruce-my282),
+#                   leaving the partner's existing references as they are
 #   --port N        SSH port for both devices (default 22)
 #   --identity KEY  SSH key (default ~/.ssh/id_ed25519)
 #   --user USER     SSH user for both devices (default root; spruce: spruce).
@@ -33,10 +35,11 @@ DEVBRIDGE=${DEVBRIDGE:-$ROOT/../DevBridge.pak}
 HELPERS=/tmp/netplay-devbridge
 OUT=$ROOT/testing/results/devbridge
 
-record=0 port=22 identity=$HOME/.ssh/id_ed25519 keep= user=root play_only=0
+record=0 record_only= port=22 identity=$HOME/.ssh/id_ed25519 keep= user=root play_only=0
 while [ $# -gt 0 ]; do
 	case $1 in
 	--record) record=1 ;;
+	--record-only) record=1; record_only=$2; shift ;;
 	--port) port=$2; shift ;;
 	--identity) identity=$2; shift ;;
 	--user) user=$2; shift ;;
@@ -68,6 +71,10 @@ sshd() {
 		return ;;
 	esac
 	if [ -n "$askpass" ]; then
+		# Mixed fleets: some devices take the key, others only the password.
+		ssh -p "$port" -i "$identity" -o BatchMode=yes -o ConnectTimeout=10 \
+			-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+			"$user@$addr" "$@" 2>/dev/null && return
 		SSH_ASKPASS=$askpass SSH_ASKPASS_REQUIRE=force DEVBRIDGE_PASSWORD=$DEVBRIDGE_PASSWORD \
 			setsid -w ssh -p "$port" -o ConnectTimeout=10 -o PubkeyAuthentication=no \
 			-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
@@ -123,6 +130,24 @@ play_only() {
 	fi
 }
 
+# After each WAIT_FOR game, make both devices prove they are in the game
+# the test just opened. A device stuck at spruce's save-transfer prompt,
+# still in the previous game, or back in a menu fails the test here rather
+# than playing a different game from its partner for minutes.
+sync_guard() {
+	awk '
+		/^[a-z]+:OPEN_GAME / {
+			line = $0
+			sub(/^[^"]*"/, "", line); sub(/".*$/, "", line)
+			n = split(line, parts, "/"); rom = parts[n]
+		}
+		{ print }
+		/^[a-z]+:WAIT_FOR game/ {
+			if (rom != "") print "all:TRM sh '"$HELPERS"'/sync.sh game \"" rom "\""
+		}
+	'
+}
+
 push_helpers() {
 	sshd "$1" "mkdir -p $HELPERS"
 	for f in "$HERE"/device/*.sh; do
@@ -142,7 +167,8 @@ devbridge_target() {
 }
 
 auth="--identity $identity"
-[ -z "$askpass" ] || auth=
+# With a password available, keep the key too: mixed rigs have devices of both kinds.
+[ -z "$askpass" ] || auth="--identity $identity --password-fallback"
 
 host_platform=$(platform_of "$host")
 guest_platform=$(platform_of "$guest")
@@ -167,19 +193,39 @@ for test in "$@"; do
 		if [ $record = 1 ]; then
 			# VERIFY_WAIT REF TIMEOUT -> wait the whole timeout, then capture
 			# the screen under a name that says where its reference belongs.
-			awk '{
-				if (match($0, /^[a-z]+:VERIFY_WAIT /)) {
-					split($0, w, " "); split(w[1], p, ":")
-					n = split(w[2], parts, "/")
-					ref = parts[n]; sub(/\.png$/, "", ref)
-					print "WAIT " w[3]
-					print p[1] ":SCREEN rec__" parts[n - 1] "__" ref
-				} else print
+			# VERIFY_UNTIL presses until a screen shows, so it cannot become a
+			# plain wait: under --record-only it steers by the partner
+			# platform's reference of the same name (the same game screen),
+			# then captures. A provisional reference of the platform's own
+			# (e.g. one scaled from another device) steers first. Lines for platforms not being recorded keep
+			# verifying against their existing references.
+			partner=$host_platform
+			[ "$partner" != "$record_only" ] || partner=$guest_platform
+			awk -v only="$record_only" -v partner="$partner" -v refs="$HERE/refs" '
+			function exists(f) { return (getline line < f) > 0 ? (close(f) || 1) : 0 }
+			{
+				if (!match($0, /^[a-z]+:VERIFY_(WAIT|UNTIL) /)) { print; next }
+				split($0, w, " "); split(w[1], p, ":")
+				n = split(w[2], parts, "/")
+				dir = parts[n - 1]
+				if (only != "" && dir != only) { print; next }
+				ref = parts[n]; sub(/\.png$/, "", ref)
+				if (w[1] ~ /:VERIFY_WAIT$/) print "WAIT " w[3]
+				else {
+					# Steer by the recorded platform provisional reference
+					# when one exists, else by the partner platform one.
+					steer = refs "/" dir "/" parts[n]
+					if (!exists(steer)) steer = refs "/" partner "/" parts[n]
+					if (only != "" && partner != only && exists(steer)) {
+						line2 = $0; sub(w[2], steer, line2); print line2
+					} else print "WAIT " w[3]
+				}
+				print p[1] ":SCREEN rec__" dir "__" ref
 			}'
 		else
 			cat
 		fi
-	} > "$script"
+	} | sync_guard > "$script"
 	if [ -n "${DEVBRIDGE_ATTEMPT_DIR:-}" ]; then
 		cp "$script" "$DEVBRIDGE_ATTEMPT_DIR/rendered-$name.test"
 	fi
@@ -195,6 +241,17 @@ for test in "$@"; do
 	fi
 	sshd "$guest" "touch $HELPERS/started"
 
+	# spruce stops a core-changing launch to ask about transferring the
+	# save; no test can answer it mid-run, so the question is off for the
+	# length of the test and the setting is put back afterwards.
+	sshd "$host" "sh $HELPERS/sync.sh prompt-off" || true
+	sshd "$guest" "sh $HELPERS/sync.sh prompt-off" || true
+	# keys.sh drives the game through DevBridge's input daemon; where the
+	# app did not start it (an A30 reports input=unavailable), tests would
+	# press nothing at all, so start it where it exists.
+	sshd "$host" "[ -x /mnt/SDCARD/App/DevBridge/bin/input-on ] && /mnt/SDCARD/App/DevBridge/bin/input-on" || true
+	sshd "$guest" "[ -x /mnt/SDCARD/App/DevBridge/bin/input-on ] && /mnt/SDCARD/App/DevBridge/bin/input-on" || true
+
 	echo "== $name"
 	# -P, not -I: VERIFY needs Pillow, often only in user site-packages.
 	# shellcheck disable=SC2046
@@ -207,12 +264,16 @@ for test in "$@"; do
 		status=1
 	fi
 	rm -f "$script"
+	sshd "$host" "sh $HELPERS/sync.sh prompt-restore" || true
+	sshd "$guest" "sh $HELPERS/sync.sh prompt-restore" || true
 
 	if [ $record = 1 ]; then
 		for f in "$OUT/$session"/rec__*.png; do
 			[ -f "$f" ] || continue
 			base=$(basename "$f" .png); base=${base#rec__}
 			plat=${base%%__*}; ref=${base#*__}; ref=${ref%-host}; ref=${ref%-guest}
+			[ -z "$record_only" ] || [ "$plat" = "$record_only" ] || continue
+			mkdir -p "$HERE/refs/$plat"
 			cp "$f" "$HERE/refs/$plat/$ref.png"
 			echo "recorded refs/$plat/$ref.png"
 		done

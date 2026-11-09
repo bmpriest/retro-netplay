@@ -10,6 +10,8 @@
 #   ctl.sh pak dsperate|drastic install
 #   ctl.sh set adhoc_switch|compatibility_cores 0|1
 #   ctl.sh set instanced 0|1|2
+#   ctl.sh set verbose_logs 0|1   per-game netplay logs, which check.sh judges:
+#                                 set it on both devices before arming a test run
 #
 # The same environment launch.sh gives the app (NextUI's Netplay.pak or
 # spruce's App/Netplay), then `netplay.elf --ctl`.
