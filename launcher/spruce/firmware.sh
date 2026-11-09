@@ -22,6 +22,7 @@ np_spruce_platform() {
 		SmartProS)               echo tg5050 ;;
 		Anbernic*)               echo h700 ;;
 		Flip|RGB30|RGB20SX|Miniloong) echo my355 ;;
+		A30|MIYOO_A30)               echo my282 ;;
 		*)                       return 1 ;;
 	esac
 }

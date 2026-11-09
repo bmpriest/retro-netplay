@@ -601,7 +601,7 @@ corecmp:
 # NextUI release; RK3566 selects Spruce's installed SDL runtime instead.
 ###########################################################
 
-SPRUCE_PLATFORMS := tg5040 tg5050 my355 h700
+SPRUCE_PLATFORMS := tg5040 tg5050 my355 h700 my282
 SPRUCE_STAGE     := dist/stage-spruce
 SPRUCE_ARCHIVE   := dist/Spruce-Netplay-Complete.zip
 NEXTUI_BASE_URL    := https://github.com/LoveRetro/NextUI/releases/download/v6.15.0/NextUI-20261013-0-base.zip
@@ -614,6 +614,9 @@ SPRUCE_LIBS_my355  := libsamplerate.so.0 libzip.so.5 libcrypto.so.1.1 \
                       libSDL2-2.0.so.0 libSDL2_image-2.0.so.0 libSDL2_ttf-2.0.so.0
 SPRUCE_LIBS_h700   := libsamplerate.so.0 libzip.so.5 libcrypto.so.1.1 \
                       libSDL2-2.0.so.0 libSDL2_image-2.0.so.0 libSDL2_ttf-2.0.so.0
+# The my282 (A30) binaries link only SDL2/GLES/libc (see readelf -d), and
+# the NextUI base zip has no .system/my282 to take extra libs from anyway.
+SPRUCE_LIBS_my282  :=
 
 $(NEXTUI_BASE_ZIP):
 	@mkdir -p .cache

@@ -27,7 +27,11 @@ np_route_core() {
 	# that the same packaged compatibility build is available locally on each.
 	REAL_CORE="$CORE"
 	CORE_ID="${CORE_NAME%_libretro.so}"
-	case "$PLATFORM" in
+	# Word size of the frontend that will load the core. Normally the
+	# platform's own; a 64-bit spruce device that negotiated down for a
+	# 32-bit peer (compat_ra32) runs its 32-bit RetroArch instead, and
+	# the caller says so with NETPLAY_SHIM_PLATFORM=my282.
+	case "${NETPLAY_SHIM_PLATFORM:-$PLATFORM}" in
 		my282) COMPAT_ARCH=armv7 ;;
 		*)     COMPAT_ARCH=aarch64 ;;
 	esac
@@ -39,9 +43,11 @@ np_route_core() {
 	if [ "$CORE_ID" = "snes9x2005" ]; then
 		COMPAT_CORE="$NP/cores/compatibility/$COMPAT_ARCH/snes9x_libretro.so"
 	fi
-	NETPLAY_CORE="$NP/cores/override/$PLATFORM/$CORE_NAME"
-	DUAL_GAMBATTE_CORE="$NP/cores/override/$PLATFORM/gambatte_dual_libretro.so"
-	DUAL_MGBA_CORE="$NP/cores/override/$PLATFORM/mgba_dual_libretro.so"
+	# Packaged cores are per word size too: under compat_ra32 the frontend
+	# loading them is the 32-bit one, so route to the my282 builds.
+	NETPLAY_CORE="$NP/cores/override/${NETPLAY_SHIM_PLATFORM:-$PLATFORM}/$CORE_NAME"
+	DUAL_GAMBATTE_CORE="$NP/cores/override/${NETPLAY_SHIM_PLATFORM:-$PLATFORM}/gambatte_dual_libretro.so"
+	DUAL_MGBA_CORE="$NP/cores/override/${NETPLAY_SHIM_PLATFORM:-$PLATFORM}/mgba_dual_libretro.so"
 	CORE_NOTICE=""
 
 	# The stock gambatte has Game Link compiled out and stock gpSP lacks this

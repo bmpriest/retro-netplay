@@ -17,7 +17,7 @@ NP="$NETPLAY_PAK"
 RA_DIR="$(cd -P "$SDCARD_PATH/RetroArch" 2>/dev/null && pwd)" || RA_DIR="$SDCARD_PATH/RetroArch"
 STASH=/tmp/netplay/ra
 SHADOW="$NP/launcher/retroarch.sh"
-BINS="ra64.universal ra64.h700"
+BINS="ra64.universal ra64.h700 ra32.universal ra32.h700 ra32.a30 ra32.mini"
 
 log() { echo "[netplay-ra] $*"; }
 
@@ -34,7 +34,15 @@ do_up() {
 	for bin in $BINS; do
 		target="$RA_DIR/$bin"
 		[ -f "$target" ] || continue
-		if mounted "$target"; then n=$((n + 1)); continue; fi
+		if mounted "$target"; then
+			# Already covered - but by the shadow as it was when first
+			# bound. An updated pak replaces that file without touching
+			# this mount, and a fresh bind will not stack over the old
+			# one here, so uncover and fall through to cover it with
+			# the current shadow. Safe at arm time: nothing launches
+			# between the two mounts.
+			umount "$target" 2>/dev/null || { log "cannot uncover $bin"; n=$((n + 1)); continue; }
+		fi
 		[ -f "$STASH/$bin" ] || : > "$STASH/$bin"
 		if ! mounted "$STASH/$bin"; then
 			mount --bind "$target" "$STASH/$bin" || { log "cannot stash $bin"; return 1; }

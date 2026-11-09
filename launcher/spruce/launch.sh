@@ -79,6 +79,12 @@ case "$SPRUCE_PLATFORM" in
 		PYSDL2_DLL_PATH=$SDCARD_PATH/App/PyUI/dll
 		NETPLAY_PYUI_DEVICE=MIYOO_FLIP
 		;;
+	A30)
+		# 32-bit device: PyUI runs on spruce's own python (get_python_path,
+		# already assigned above), not the aarch64 flip MainUI binary.
+		PYSDL2_DLL_PATH=$SDCARD_PATH/App/PyUI/dll
+		NETPLAY_PYUI_DEVICE=MIYOO_A30
+		;;
 	RGB30|RGB20SX|Miniloong)
 		PYTHON=$SDCARD_PATH/spruce/flip/bin/MainUI
 		PYSDL2_DLL_PATH=$SDCARD_PATH/App/PyUI/dll

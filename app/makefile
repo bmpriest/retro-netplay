@@ -114,7 +114,7 @@ endif
 
 $(SPRUCE_INC)/platform.h: $(PLATDIR)/platform.h
 	@mkdir -p $(SPRUCE_INC)
-	sed 's|^#define SDCARD_PATH "/mnt/SDCARD"$$|#define SDCARD_PATH "/mnt/SDCARD/App/Netplay/nextui"|' $< > $@
+	sed 's|^#define SDCARD_PATH  *"/mnt/SDCARD"|#define SDCARD_PATH "/mnt/SDCARD/App/Netplay/nextui"|' $< > $@
 	@grep -q 'App/Netplay/nextui' $@ || { echo "SDCARD_PATH not found in $<"; rm -f $@; exit 1; }
 
 clean:

@@ -14,6 +14,7 @@ TARGETS = {
     'SmartPro': ('tg5040', 'TRIMUI_SMART_PRO'),
     'SmartProS': ('tg5050', 'TRIMUI_SMART_PRO_S'),
     'Flip': ('my355', 'MIYOO_FLIP'),
+    'A30': ('my282', 'MIYOO_A30'),
     'AnbernicXX640480': ('h700', 'ANBERNIC_RGXX640480'),
     'AnbernicXX720480NoStick': ('h700', 'ANBERNIC_RGXX720480'),
     'AnbernicRG28XX': ('h700', 'ANBERNIC_RG28XX'),
@@ -26,7 +27,7 @@ TARGETS = {
 class SpruceTargets(unittest.TestCase):
     def test_menu_advertises_only_rc_families(self):
         devices = json.loads((ROOT/'launcher/spruce/config.json').read_text())['devices']
-        self.assertEqual(set(devices), {'TRIMUI_A133P', 'TRIMUI_SMART_PRO_S', 'MIYOO_FLIP',
+        self.assertEqual(set(devices), {'TRIMUI_A133P', 'TRIMUI_SMART_PRO_S', 'MIYOO_FLIP', 'MIYOO_A30',
                                        'ANBERNIC_RGXX', 'RGB30', 'RGB20SX', 'MINILOONG_POCKET1'})
 
     def test_real_launcher_routes_each_model_and_runtime(self):
@@ -40,11 +41,12 @@ class SpruceTargets(unittest.TestCase):
                 if executable: path.chmod(0o755)
             write('App/Netplay/launcher/firmware.sh', (ROOT/'launcher/spruce/firmware.sh').read_text())
             write('App/Netplay/launch.sh', (ROOT/'launcher/spruce/launch.sh').read_text().replace('/mnt/SDCARD', str(card)))
-            write('spruce/scripts/helperFunctions.sh', 'PLATFORM=$TEST_MODEL\nget_python_path() { echo /usr/bin/python3; }\n')
+            write('spruce/scripts/helperFunctions.sh', 'PLATFORM=$TEST_MODEL\nget_python_path() { echo "$SDCARD_PATH/fake-python"; }\n')
+            write('fake-python', '#!/bin/sh\nprintf "%s\\n" "$PLATFORM" "$NETPLAY_PYUI_DEVICE" "$PYSDL2_DLL_PATH" "${SDL_VIDEODRIVER:-}" "${SDL_AUDIODRIVER:-}" "$NETPLAY_ENGINE_LD_LIBRARY_PATH" "$*" > "$TEST_RESULT"\n', True)
             for library in ('libSDL2-2.0', 'libSDL2_image-2.0', 'libSDL2_ttf-2.0'):
                 write(f'App/PyUI/dll/{library}.so', 'fake SDL runtime')
             write('spruce/flip/bin/MainUI', '#!/bin/sh\nprintf "%s\\n" "$PLATFORM" "$NETPLAY_PYUI_DEVICE" "$PYSDL2_DLL_PATH" "${SDL_VIDEODRIVER:-}" "${SDL_AUDIODRIVER:-}" "$NETPLAY_ENGINE_LD_LIBRARY_PATH" "$*" > "$TEST_RESULT"\n', True)
-            for build in ('tg5040', 'tg5050', 'my355', 'h700'):
+            for build in ('tg5040', 'tg5050', 'my355', 'h700', 'my282'):
                 write(f'App/Netplay/bin/{build}/netplay.elf', '#!/bin/sh\nexit 0\n', True)
             for model, (build, identity) in TARGETS.items():
                 with self.subTest(model=model):
@@ -77,7 +79,7 @@ class SpruceTargets(unittest.TestCase):
 
     def test_other_nightly_models_are_not_mapped(self):
         script = '. "$1"; np_spruce_platform "$2"'
-        for model in ('A30', 'MiyooMini', 'RG353M', 'Zero40', 'unknown'):
+        for model in ('MiyooMini', 'RG353M', 'Zero40', 'unknown'):
             result = subprocess.run(['sh', '-c', script, 'test',
                                      str(ROOT/'launcher/spruce/firmware.sh'), model], capture_output=True)
             self.assertNotEqual(result.returncode, 0, model)

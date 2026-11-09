@@ -694,11 +694,17 @@ void NS_settingsSave(void) {
 	NS_quickMenuSync();
 }
 
-/* The firmware's own copy of a core: NextUI's system cores, or the 64-bit
- * RetroArch cores every 64-bit spruce device shares. */
+/* The firmware's own copy of a core: NextUI's system cores, or the
+ * RetroArch cores spruce launches. 64-bit spruce devices use cores64;
+ * the 32-bit A30 (my282) ships the same names under cores - its cores64
+ * copies are aarch64 files it can never load, and advertising their ELF
+ * machine would make a peer think it is talking to a 64-bit device. */
 static void system_core_path(const char* core, char* out, int len) {
 #ifdef NETPLAY_SPRUCE
-	snprintf(out, len, "%s/RetroArch/.retroarch/cores64/%s_libretro.so", ns_sd, core);
+	if (!strcmp(ns_platform, "my282"))
+		snprintf(out, len, "%s/RetroArch/.retroarch/cores/%s_libretro.so", ns_sd, core);
+	else
+		snprintf(out, len, "%s/RetroArch/.retroarch/cores64/%s_libretro.so", ns_sd, core);
 #else
 	snprintf(out, len, "%s/.system/%s/cores/%s_libretro.so", ns_sd, ns_platform, core);
 #endif
@@ -1267,7 +1273,7 @@ static bool compatibility_builds_match(const NS_CoreInfo* a, const NS_CoreInfo* 
 static bool write_compat_file(const char* path,
                               const char selected[][32], int count,
                               const char mismatched[][32], int mismatch_count,
-                              uint32_t instanced_mask) {
+                              uint32_t instanced_mask, bool ra32) {
 	char tmp[560];
 	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
 	FILE* in = fopen(path, "r");
@@ -1279,6 +1285,7 @@ static bool write_compat_file(const char* path,
 	while (fgets(line, sizeof(line), in))
 		if (strncmp(line, "compat_core.", 12) &&
 		    strncmp(line, "core_mismatch.", 14) &&
+		    strncmp(line, "compat_ra32=", 12) &&
 		    strncmp(line, "instanced_gambatte=", 19) &&
 		    strncmp(line, "instanced_mgba=", 15)) fputs(line, out);
 	for (int i = 0; i < count; i++) fprintf(out, "compat_core.%s=1\n", selected[i]);
@@ -1290,6 +1297,10 @@ static bool write_compat_file(const char* path,
 	 * nothing to talk to - and both session files are rewritten here. */
 	fprintf(out, "instanced_gambatte=%d\n", (instanced_mask & INST_CAP_GAMBATTE) ? 1 : 0);
 	fprintf(out, "instanced_mgba=%d\n", (instanced_mask & INST_CAP_MGBA) ? 1 : 0);
+	/* Written only on the 64-bit side of a mixed pair: its launcher then
+	 * runs spruce's 32-bit RetroArch with the 32-bit cores, so both ends
+	 * execute the same word size the 32-bit device (an A30) cannot leave. */
+	fprintf(out, "compat_ra32=%d\n", ra32 ? 1 : 0);
 
 	fclose(in);
 	if (fclose(out) != 0 || rename(tmp, path) != 0) {
@@ -1376,18 +1387,32 @@ static int select_compatibility(NS_CoreInfo* mine, int mn, NS_CoreInfo* theirs, 
 	       (instanced & INST_CAP_GAMBATTE) ? 1 : 0,
 	       (instanced & INST_CAP_MGBA) ? 1 : 0);
 
+	/* Word size agreement. The manifest already carries each core's ELF
+	 * machine, so a 32-bit peer (EM_ARM, an A30 that can only run
+	 * RetroArch32) is visible without new wire fields. Only the 64-bit
+	 * side acts: it drops to its 32-bit RetroArch and cores at launch. */
+	bool local_32 = !strcmp(compatibility_arch(), "armv7");
+	bool peer_32 = false, peer_64 = false;
+	for (int i = 0; i < tn; i++) {
+		if (theirs[i].machine == 40) peer_32 = true;        /* EM_ARM */
+		if (theirs[i].machine == 183) peer_64 = true;       /* EM_AARCH64 */
+	}
+	bool ra32 = !local_32 && peer_32 && !peer_64;
+	ns_log("word size: local=%s peer32=%d peer64=%d -> compat_ra32=%d\n",
+	       local_32 ? "armv7" : "aarch64", peer_32, peer_64, ra32);
+
 	char path[512];
 	snprintf(path, sizeof(path), "%s/session.conf", ns_state);
-	if (!write_compat_file(path, selected, count, mismatched, mismatch_count, instanced)) {
+	if (!write_compat_file(path, selected, count, mismatched, mismatch_count, instanced, ra32)) {
 		ns_log("cannot update compatibility selections in session.conf\n");
 		return -1;
 	}
 	snprintf(path, sizeof(path), "%s/session", ns_state);
-	if (!write_compat_file(path, selected, count, mismatched, mismatch_count, instanced)) {
+	if (!write_compat_file(path, selected, count, mismatched, mismatch_count, instanced, ra32)) {
 		ns_log("cannot update compatibility selections in active session\n");
 		/* Do not leave a durable selection that disagrees with the active file. */
 		snprintf(path, sizeof(path), "%s/session.conf", ns_state);
-		write_compat_file(path, selected, 0, mismatched, 0, false);
+		write_compat_file(path, selected, 0, mismatched, 0, false, false);
 		return -1;
 	}
 	return count;

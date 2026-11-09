@@ -46,6 +46,66 @@ for a in "$@"; do
 	prev="$a"
 	ROM="$a"
 done
+
+# Word size. A session paired with a 32-bit device (an A30, which only has
+# RetroArch32) carries compat_ra32=1 from core negotiation: this device
+# then runs spruce's 32-bit RetroArch with spruce's 32-bit cores and the
+# 32-bit shim, so both ends execute the same word size. A device whose
+# covered binary already is 32-bit (the A30 itself) just says so.
+SHIM_PLATFORM="$PLATFORM"
+case "$(basename "$0")" in
+	ra32*) SHIM_PLATFORM=my282 ;;
+esac
+RA32_OVERLAY=
+if [ "$SHIM_PLATFORM" != "my282" ] && [ -n "$NETPLAY_SESSION" ] &&
+   grep -q '^compat_ra32=1$' "$NETPLAY_SESSION" 2>/dev/null; then
+	# The covered binary's own twin first (ra64.h700 -> ra32.h700): the
+	# builds differ in more than name - the universal 32-bit build has no
+	# fbdev_mali context for the H700's video cfg and dies opening it.
+	covered=$(basename "$0")
+	for ra32bin in "ra32.${covered#ra64.}" ra32.universal ra32.h700 ra32.mini ra32.a30; do
+		if [ -x "$STASH/$ra32bin" ]; then
+			REAL_RA="$STASH/$ra32bin"
+			SHIM_PLATFORM=my282
+			# spruce named the 64-bit core; its 32-bit twin ships beside it.
+			case "$CORE" in
+				*/cores64/*) CORE="${CORE%/cores64/*}/cores/${CORE##*/}" ;;
+			esac
+			# spruce layers a per-device 32-bit overlay over the platform
+			# cfg when it launches this binary itself (fbdev_mali video
+			# context, linuxraw pad). Without it the 32-bit build dies
+			# opening its video driver. Its name follows the platform cfg
+			# spruce passed us: retroarch-<device>.cfg -> the same name
+			# with -32bit in RetroArch/platform/.
+			prev=
+			for a in "$@"; do
+				if [ "$prev" = "--config" ]; then
+					cfgname=$(basename "$a" .cfg)
+					overlay="$SDCARD_PATH/RetroArch/platform/$cfgname-32bit.cfg"
+					[ -f "$overlay" ] && RA32_OVERLAY="$overlay"
+				fi
+				prev="$a"
+			done
+			# spruce's 32-bit cores link libstdc++ symbols newer than
+			# the 64-bit system's 32-bit runtime (GLIBCXX_3.4.32 vs the
+			# 3.4.30 in spruce/<device>/lib32). The cores are the A30
+			# builds, and spruce/a30/lib carries the runtime they were
+			# built against; it holds no SDL/EGL to shadow lib32's, so
+			# it goes first, with lib32 behind it for the rest.
+			for lib32 in "$SDCARD_PATH/spruce/a30/lib" "$SDCARD_PATH"/spruce/*/lib32; do
+				[ -d "$lib32" ] || continue
+				LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$lib32"
+				export LD_LIBRARY_PATH
+			done
+			echo "[netplay] 32-bit peer: running $ra32bin with 32-bit cores" >&2
+			break
+		fi
+	done
+fi
+if [ "$SHIM_PLATFORM" = "my282" ]; then
+	NETPLAY_SHIM_PLATFORM=my282
+	export NETPLAY_SHIM_PLATFORM
+fi
 case "$(basename "$CORE")" in
 	fceumm_libretro.so|snes9x_libretro.so|snes9x2005_libretro.so|\
 	mednafen_supafaust_libretro.so|picodrive_libretro.so|pcsx_rearmed_libretro.so|\
@@ -53,7 +113,7 @@ case "$(basename "$CORE")" in
 	*) PLATFORM="$SPRUCE_PLATFORM" exec "$REAL_RA" "$@" ;;
 esac
 
-SHIM="$NP/bin/$PLATFORM/netplay_shim.so"
+SHIM="$NP/bin/$SHIM_PLATFORM/netplay_shim.so"
 if [ ! -f "$SHIM" ]; then
 	echo "[netplay] shim missing at $SHIM, launching stock" >&2
 	PLATFORM="$SPRUCE_PLATFORM" exec "$REAL_RA" "$@"
@@ -81,12 +141,17 @@ shift "$count"
 # spruce's when it passed one.
 SESSION_CFG="$NP/launcher/retroarch-session.cfg"
 if [ -f "$SESSION_CFG" ]; then
+	# The 32-bit overlay sits between spruce's own appends and the session
+	# cfg: platform settings first, then the word-size driver/pad layer,
+	# then Netplay's session rules on top.
+	extra="$SESSION_CFG"
+	[ -n "$RA32_OVERLAY" ] && extra="$RA32_OVERLAY|$SESSION_CFG"
 	count=$#
 	prev=
 	appended=0
 	for a in "$@"; do
 		if [ "$prev" = "--appendconfig" ]; then
-			set -- "$@" "$a|$SESSION_CFG"
+			set -- "$@" "$a|$extra"
 			appended=1
 		else
 			set -- "$@" "$a"
@@ -94,7 +159,9 @@ if [ -f "$SESSION_CFG" ]; then
 		prev="$a"
 	done
 	shift "$count"
-	[ "$appended" = 1 ] || set -- --appendconfig "$SESSION_CFG" "$@"
+	[ "$appended" = 1 ] || set -- --appendconfig "$extra" "$@"
+elif [ -n "$RA32_OVERLAY" ]; then
+	set -- --appendconfig "$RA32_OVERLAY" "$@"
 fi
 
 # Offer the game to the other device; its menu asks the player (invite.sh).
