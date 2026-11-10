@@ -56,6 +56,36 @@ do_up() {
 		n=$((n + 1))
 	done
 	[ "$n" -gt 0 ] || { log "no RetroArch binary in $RA_DIR"; return 1; }
+	mini_up
+}
+
+# The Mini Flip starts RetroArch as RetroArch/retroarch, a placeholder spruce
+# binds ra32.mini onto at boot - so covering ra32.mini (above) does not reach
+# it. Stash the real ra32.mini under that name and cover the placeholder; down
+# puts spruce's bind back.
+mini_up() {
+	target="$RA_DIR/retroarch"
+	[ -f "$RA_DIR/ra32.mini" ] && [ -f "$target" ] || return 0
+	[ -f "$STASH/ra32.mini" ] && mounted "$STASH/ra32.mini" || return 0
+	if ! mounted "$target" && [ ! -f "$STASH/retroarch.spruce" ]; then
+		return 0   # not a Mini boot: spruce never bound anything here
+	fi
+	: > "$STASH/retroarch.spruce"
+	while mounted "$target"; do umount "$target" 2>/dev/null || { log "cannot uncover retroarch"; return 1; }; done
+	[ -f "$STASH/retroarch" ] || : > "$STASH/retroarch"
+	mounted "$STASH/retroarch" || mount --bind "$STASH/ra32.mini" "$STASH/retroarch" ||
+		{ log "cannot stash retroarch"; return 1; }
+	mount --bind "$SHADOW" "$target" || { log "cannot cover retroarch"; return 1; }
+	log "covered retroarch (ra32.mini)"
+}
+
+mini_down() {
+	[ -f "$STASH/retroarch.spruce" ] || return 0
+	target="$RA_DIR/retroarch"
+	while mounted "$target"; do umount "$target" 2>/dev/null || break; done
+	mounted "$STASH/retroarch" && umount "$STASH/retroarch"
+	rm -f "$STASH/retroarch" "$STASH/retroarch.spruce"
+	mount --bind "$RA_DIR/ra32.mini" "$target"   # as spruce's boot left it
 }
 
 do_down() {
@@ -66,6 +96,7 @@ do_down() {
 		rm -f "$STASH/$bin"
 	done
 	rm -f "$STASH/platform"
+	mini_down   # last: ra32.mini must be uncovered before it is bound back
 	return 0
 }
 
@@ -74,6 +105,7 @@ do_status() {
 		[ -f "$RA_DIR/$bin" ] || continue
 		if mounted "$RA_DIR/$bin"; then echo "covered  $bin"; else echo "stock    $bin"; fi
 	done
+	[ -f "$STASH/retroarch.spruce" ] && echo "covered  retroarch"
 }
 
 case "$1" in

@@ -89,6 +89,30 @@ case "$SPRUCE_PLATFORM" in
 		PYSDL2_DLL_PATH=$SDCARD_PATH/spruce/a30/sdl2
 		NETPLAY_PYUI_DEVICE=MIYOO_A30
 		;;
+	MiyooMini)
+		# As App/PyUI/launch.sh starts PyUI on the Mini family: spruce's
+		# 32-bit python, its own SDL on the mmiyoo driver.
+		PYTHON=$SDCARD_PATH/spruce/bin/python/bin/MainUI
+		PATH="$SDCARD_PATH/spruce/miyoomini/bin:$PATH"
+		PYSDL2_DLL_PATH=$SDCARD_PATH/spruce/miyoomini/lib
+		LD_LIBRARY_PATH="$SDCARD_PATH/spruce/bin/python/lib:${LD_LIBRARY_PATH:-}"
+		SDL_VIDEODRIVER=mmiyoo
+		SDL_AUDIODRIVER=mmiyoo
+		EGL_VIDEODRIVER=mmiyoo
+		SDL_MMIYOO_DOUBLE_BUFFER=1
+		LD_PRELOAD=$SDCARD_PATH/miyoo/lib/libpadsp.so
+		export PATH EGL_VIDEODRIVER SDL_MMIYOO_DOUBLE_BUFFER LD_PRELOAD
+		NETPLAY_PYUI_DEVICE=$(get_miyoo_mini_variant 2>/dev/null)
+		[ -n "$NETPLAY_PYUI_DEVICE" ] || NETPLAY_PYUI_DEVICE=MIYOO_MINI_FLIP
+		# freemma clears what the last graphics app left behind; PyUI waits
+		# for it. Only when the app opens: an invitation draws over spruce's
+		# menu, which is paused, not gone, and still owns those buffers.
+		unset PYUI_MMA_CLEANUP_PID
+		if [ "$1" != --invite ] && command -v freemma >/dev/null 2>&1; then
+			PYUI_MMA_CLEANUP_PID="$(freemma >/dev/null 2>&1 & echo $!)"
+			export PYUI_MMA_CLEANUP_PID
+		fi
+		;;
 	RGB30|RGB20SX|Miniloong)
 		PYTHON=$SDCARD_PATH/spruce/flip/bin/MainUI
 		PYSDL2_DLL_PATH=$SDCARD_PATH/App/PyUI/dll

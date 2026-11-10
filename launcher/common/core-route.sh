@@ -32,7 +32,7 @@ np_route_core() {
 	# 32-bit peer (compat_ra32) runs its 32-bit RetroArch instead, and
 	# the caller says so with NETPLAY_SHIM_PLATFORM=my282.
 	case "${NETPLAY_SHIM_PLATFORM:-$PLATFORM}" in
-		my282) COMPAT_ARCH=armv7 ;;
+		my282|my285) COMPAT_ARCH=armv7 ;;
 		*)     COMPAT_ARCH=aarch64 ;;
 	esac
 	COMPAT_CORE="$NP/cores/compatibility/$COMPAT_ARCH/$CORE_NAME"

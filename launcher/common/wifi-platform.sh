@@ -52,8 +52,10 @@ NP_PROC="${NP_PROC:-/proc}"
 #   NP_INIT      path to the platform's wifi_init.sh, or empty
 #   NP_HOOK      1 if a `wpa_cli -a <script>` DHCP hook must be replayed with
 #                the supplicant (H700 drives DHCP entirely from that hook)
-#   NP_PS        nl80211 | rtw-reload     how radio power save is switched:
-#                at runtime through nl80211, or only by reloading the driver
+#   NP_PS        nl80211 | rtw-reload | rtw-cycle    how radio power save is
+#                switched: at runtime through nl80211, only by reloading the
+#                driver (H700's 8821cs), or by power-cycling the radio with
+#                the driver's parameters changed (the Mini Flip's 8188fu)
 #   NP_CTRL      default supplicant ctrl_interface when none is running
 ###########################################################################
 
@@ -94,6 +96,16 @@ np_platform_profile() {
 		NP_DHCP=dhcpcd
 		NP_INIT="$SYSTEM_PATH/etc/wifi/wifi_init.sh"
 		NP_CTRL=/var/run/wpa_supplicant
+		;;
+	my285)
+		# The Miyoo Mini Flip, on spruce only (spruce's MiyooMini). spruce's
+		# network/wifi.sh owns the supplicant and udhcpc; its udhcpc needs
+		# the firmware's own lease script.
+		NP_DHCP=udhcpc
+		NP_DHCP_ARGS="-s /etc/init.d/udhcpc.script"
+		NP_PS=rtw-cycle
+		NP_RTW_MODULE=8188fu
+		NP_RTW_PS_INFO=/proc/net/rtl8188fu/$NP_WIFI_IF/ps_info
 		;;
 	h700)
 		# No iw. DHCP is driven entirely by a `wpa_cli -a` action script, so
@@ -528,6 +540,64 @@ np_rtw_powersave_get() {
 
 np_rtw_log() { echo "wifi-platform: $*" >&2; }
 
+# spruce's one way to change the radio. It moved from scripts/ to
+# scripts/network/; with neither found the reload below ran under spruce's live
+# supplicant and left the H700 off the network.
+np_spruce_wifi_script() {
+	for _s in "$SDCARD_PATH/spruce/scripts/network/wifi.sh" "$SDCARD_PATH/spruce/scripts/wifi.sh"; do
+		[ -f "$_s" ] && { echo "$_s"; return 0; }
+	done
+	return 1
+}
+
+# The Miyoo Mini Flip's RTL8188FU, as NextUI's my285 network.sh found it:
+# rtw_power_mgnt and rtw_ips_mode are module parameters the driver latches when
+# the USB device probes, and the device only probes when axp_test powers the
+# radio's rail. So power-save off is: rail off, the parameters written while it
+# is off, rail on - spruce's wifi.sh apply does that last step itself whenever
+# wlan0 is missing - then nl80211 power save off once the interface is up,
+# because a kernel built with CFG80211_DEFAULT_PS turns it back on at every
+# interface up and the driver leaves LPS only on an explicit "off".
+: "${NP_AXP_TEST:=/customer/app/axp_test}"
+np_rtl8188_cycle() {  # np_rtl8188_cycle on|off
+	case "$1" in on) _mgnt=2; _ips=1 ;; off) _mgnt=0; _ips=0 ;; *) return 2 ;; esac
+	_params=${NP_RTW_PARAMS:-/sys/module/$NP_RTW_MODULE/parameters}
+	[ -w "$_params/rtw_power_mgnt" ] || { np_rtw_log "no $NP_RTW_MODULE parameters to write"; return 1; }
+	[ -x "$NP_AXP_TEST" ] || { np_rtw_log "no $NP_AXP_TEST to power the radio"; return 1; }
+	_spruce_wifi=
+	np_is_spruce && _spruce_wifi=$(np_spruce_wifi_script)
+
+	np_rtw_log "power-cycling $NP_RTW_MODULE with rtw_power_mgnt=$_mgnt rtw_ips_mode=$_ips"
+	if [ -n "$_spruce_wifi" ]; then
+		sh "$_spruce_wifi" suspend --wait >/dev/null 2>&1
+	else
+		np_wifi_init stop
+	fi
+	ifconfig "$NP_WIFI_IF" down 2>/dev/null
+	"$NP_AXP_TEST" wifioff >/dev/null 2>&1
+	_w=0
+	while [ -d "$NP_SYS_NET/$NP_WIFI_IF" ] && [ "$_w" -lt 40 ]; do sleep 0.25; _w=$((_w + 1)); done
+	[ -d "$NP_SYS_NET/$NP_WIFI_IF" ] && np_rtw_log "$NP_WIFI_IF still present after wifioff; the new values may not latch"
+	echo "$_mgnt" > "$_params/rtw_power_mgnt" 2>/dev/null
+	echo "$_ips" > "$_params/rtw_ips_mode" 2>/dev/null
+	if [ -n "$_spruce_wifi" ]; then
+		sh "$_spruce_wifi" apply --wait >/dev/null 2>&1
+	else
+		"$NP_AXP_TEST" wifion >/dev/null 2>&1
+		_w=0
+		while [ ! -d "$NP_SYS_NET/$NP_WIFI_IF" ] && [ "$_w" -lt 40 ]; do sleep 0.25; _w=$((_w + 1)); done
+		np_wifi_init start
+	fi
+	_w=0
+	while ! np_has_ip && [ "$_w" -lt 30 ]; do sleep 1; _w=$((_w + 1)); done
+	if [ "$1" = off ]; then
+		_h=$(np_wifips_helper) && "$_h" "$NP_WIFI_IF" off >/dev/null 2>&1
+	fi
+	np_has_ip || { np_rtw_log "radio power-cycled but no address yet"; return 3; }
+	np_rtw_log "power-cycled, power save $(np_powersave_get), address $(np_ip)"
+	return 0
+}
+
 # One load attempt, with BaseOS rcS's own preparation: with the radio powered
 # off, ask the platform to drop the stale SDIO card before the driver powers it
 # up again, or the probe races the driver's own rescan.
@@ -554,6 +624,7 @@ np_rtw_load() {  # np_rtw_load <rtw_power_mgnt> <quarter-seconds to wait>
 # because a quick re-power is exactly what those units fail on.
 np_rtw_reload() {  # np_rtw_reload on|off
 	np_platform_profile
+	[ "$NP_PS" = rtw-cycle ] && { np_rtl8188_cycle "$1"; return; }
 	[ "$NP_PS" = rtw-reload ] || return 1
 	case "$1" in on) _mgnt=2 ;; off) _mgnt=0 ;; *) return 2 ;; esac
 	[ -f "$NP_RTW_KO" ] || { np_rtw_log "no $NP_RTW_KO"; return 1; }
@@ -564,7 +635,7 @@ np_rtw_reload() {  # np_rtw_reload on|off
 	# is the one way to change the radio there; `apply` loads the driver only
 	# when it is not loaded, so the one loaded below keeps its power setting.
 	_spruce_wifi=
-	np_is_spruce && _spruce_wifi="$SDCARD_PATH/spruce/scripts/wifi.sh"
+	np_is_spruce && _spruce_wifi=$(np_spruce_wifi_script)
 
 	np_rtw_log "reloading $NP_RTW_MODULE with rtw_power_mgnt=$_mgnt (radio off ${_hold}s)"
 	if [ -n "$_spruce_wifi" ]; then
@@ -600,6 +671,15 @@ np_powersave_get() {
 		np_rtw_powersave_get
 		return
 	fi
+	if [ "$NP_PS" = rtw-cycle ]; then
+		# The driver's own LPS mode when it reports one; else the latched
+		# parameter, which is what a power-cycle sets.
+		np_rtw_powersave_get && return 0
+		case "$(cat "${NP_RTW_PARAMS:-/sys/module/$NP_RTW_MODULE/parameters}/rtw_power_mgnt" 2>/dev/null)" in
+		0) echo off ;; "") return 1 ;; *) echo on ;;
+		esac
+		return 0
+	fi
 	if np_have iw; then
 		iw dev "$NP_WIFI_IF" get power_save 2>/dev/null |
 			sed -n 's/.*Power save: *//p' | head -1
@@ -618,6 +698,15 @@ np_powersave() {
 		[ "$(np_rtw_powersave_get)" = "$1" ]
 		return
 	fi
+	if [ "$NP_PS" = rtw-cycle ]; then
+		# Cheap to repeat before every launch: an interface brought up again
+		# may have had nl80211 power save switched back on.
+		if [ "$1" = off ]; then
+			_h=$(np_wifips_helper) && "$_h" "$NP_WIFI_IF" off >/dev/null 2>&1
+		fi
+		[ "$(np_powersave_get)" = "$1" ]
+		return
+	fi
 	if np_have iw; then
 		iw dev "$NP_WIFI_IF" set power_save "$1" >/dev/null 2>&1
 		return 0
@@ -626,11 +715,12 @@ np_powersave() {
 	"$_h" "$NP_WIFI_IF" "$1" >/dev/null 2>&1
 }
 
-# Whether turning power save off needs the slow driver reload: yes only on a
-# reload platform whose radio is currently in power save.
+# Whether turning power save off needs the slow driver reload (or power-cycle):
+# yes only on such a platform whose radio is currently in power save.
 np_powersave_needs_reload() {
 	np_platform_profile
-	[ "$NP_PS" = rtw-reload ] && [ "$(np_rtw_powersave_get)" = on ]
+	case "$NP_PS" in rtw-reload|rtw-cycle) ;; *) return 1 ;; esac
+	[ "$(np_powersave_get)" = on ]
 }
 
 ###########################################################################

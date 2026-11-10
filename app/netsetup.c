@@ -559,8 +559,14 @@ bool NS_varnishInstall(char* err, int errlen) {
 	return false;
 }
 
+/* The 32-bit spruce devices: the A30 (my282) and the Miyoo Mini Flip (my285),
+ * which run the same armv7 builds. */
+static bool platform_is_32bit(void) {
+	return !strcmp(ns_platform, "my282") || !strcmp(ns_platform, "my285");
+}
+
 static const char* compatibility_arch(void) {
-	return !strcmp(ns_platform, "my282") ? "armv7" : "aarch64";
+	return platform_is_32bit() ? "armv7" : "aarch64";
 }
 
 NS_Settings* NS_settings(void) {
@@ -696,12 +702,13 @@ void NS_settingsSave(void) {
 
 /* The firmware's own copy of a core: NextUI's system cores, or the
  * RetroArch cores spruce launches. 64-bit spruce devices use cores64;
- * the 32-bit A30 (my282) ships the same names under cores - its cores64
+ * the 32-bit A30 (my282) and Mini Flip (my285) ship the same names under
+ * cores - their cores64
  * copies are aarch64 files it can never load, and advertising their ELF
  * machine would make a peer think it is talking to a 64-bit device. */
 static void system_core_path(const char* core, char* out, int len) {
 #ifdef NETPLAY_SPRUCE
-	if (!strcmp(ns_platform, "my282"))
+	if (platform_is_32bit())
 		snprintf(out, len, "%s/RetroArch/.retroarch/cores/%s_libretro.so", ns_sd, core);
 	else
 		snprintf(out, len, "%s/RetroArch/.retroarch/cores64/%s_libretro.so", ns_sd, core);
@@ -2534,7 +2541,7 @@ void NS_nickname(char* out, int len) {
 	static const struct { const char* device; const char* name; } DEVICES[] = {
 		{ "brick", "TrimUI Brick" }, { "brickpro", "TrimUI Brick Pro" },
 		{ "smartpro", "TrimUI Smart Pro" }, { "smartpros", "TrimUI Smart Pro S" },
-		{ "my282", "Miyoo A30" }, { "my355", "Miyoo Flip" },
+		{ "my282", "Miyoo A30" }, { "my285", "Miyoo Mini Flip" }, { "my355", "Miyoo Flip" },
 	};
 	const char* device = getenv("DEVICE");
 	const char* trimui = getenv("TRIMUI_MODEL");
@@ -2566,6 +2573,7 @@ void NS_nickname(char* out, int len) {
 	}
 	static const struct { const char* platform; const char* name; } FAMILIES[] = {
 		{ "tg5040", "TrimUI" }, { "tg5050", "TrimUI Smart Pro S" }, { "my282", "Miyoo A30" },
+		{ "my285", "Miyoo Mini Flip" },
 		{ "my355", "Miyoo Flip" }, { "h700", "Anbernic H700" },
 	};
 	for (size_t i = 0; i < sizeof(FAMILIES) / sizeof(FAMILIES[0]); i++)

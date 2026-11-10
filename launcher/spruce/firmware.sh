@@ -23,6 +23,7 @@ np_spruce_platform() {
 		Anbernic*)               echo h700 ;;
 		Flip|RGB30|RGB20SX|Miniloong) echo my355 ;;
 		A30|MIYOO_A30)               echo my282 ;;
+		MiyooMini)                   echo my285 ;;
 		*)                       return 1 ;;
 	esac
 }
@@ -41,6 +42,13 @@ np_spruce_engine_libraries() {
 			ln -sf "$_np_source" "$_np_sdl/$_np_lib.so.0" || return 1
 		done
 		printf '%s\n' "$_np_sdl:$NETPLAY_PAK/bin/$PLATFORM:$SDCARD_PATH/spruce/flip/lib:/usr/lib/aarch64-linux-gnu:/usr/lib:/lib:${LD_LIBRARY_PATH:-}"
+		;;
+	my285)
+		# The Mini Flip has no GPU and none of the SDL libraries netplay.elf
+		# links: on spruce it only ever runs headless (--ctl, the broker, an
+		# invitation's input), never drawing, and every SDL/GL call binds
+		# lazily, so empty libraries of the same names let it load.
+		printf '%s\n' "$NETPLAY_PAK/bin/$PLATFORM/stubs:$NETPLAY_PAK/bin/$PLATFORM:${LD_LIBRARY_PATH:-}"
 		;;
 	*) printf '%s\n' "$NETPLAY_PAK/bin/$PLATFORM:${LD_LIBRARY_PATH:-}" ;;
 	esac

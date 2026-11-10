@@ -601,7 +601,10 @@ corecmp:
 # NextUI release; RK3566 selects Spruce's installed SDL runtime instead.
 ###########################################################
 
-SPRUCE_PLATFORMS := tg5040 tg5050 my355 h700 my282
+SPRUCE_PLATFORMS := tg5040 tg5050 my355 h700 my282 my285
+# The Miyoo Mini Flip (spruce's MiyooMini, NextUI's my285) is built with the
+# A30's toolchain and SDK - NextUI's own my285 image is that toolchain - and
+# runs the A30's shim and packaged cores; only its app binaries are its own.
 SPRUCE_STAGE     := dist/stage-spruce
 SPRUCE_ARCHIVE   := dist/Spruce-Netplay-Complete.zip
 NEXTUI_BASE_URL    := https://github.com/LoveRetro/NextUI/releases/download/v6.15.0/NextUI-20261013-0-base.zip
@@ -617,6 +620,11 @@ SPRUCE_LIBS_h700   := libsamplerate.so.0 libzip.so.5 libcrypto.so.1.1 \
 # The my282 (A30) binaries link only SDL2/GLES/libc (see readelf -d), and
 # the NextUI base zip has no .system/my282 to take extra libs from anyway.
 SPRUCE_LIBS_my282  :=
+SPRUCE_LIBS_my285  :=
+# NEEDED libraries with nothing in them, for a device without them (the Mini
+# Flip: no GPU, no SDL outside spruce's PyUI). netplay.elf never draws on
+# spruce and binds every SDL/GL call lazily, so these only satisfy the loader.
+SPRUCE_STUB_LIBS   := libSDL2-2.0.so.0 libSDL2_image-2.0.so.0 libSDL2_ttf-2.0.so.0 libGLESv2.so
 
 $(NEXTUI_BASE_ZIP):
 	@mkdir -p .cache
@@ -639,13 +647,15 @@ $(NEXTUI_SYSTEM)/.spruce-runtime: $(NEXTUI_BASE_ZIP) Makefile
 app-spruce:
 	@for p in $(SPRUCE_PLATFORMS); do \
 		echo "== app spruce $$p"; \
-		sdk=$$p; [ "$$p" != my355 ] || sdk=h700; \
+		sdk=$$p; [ "$$p" != my355 ] || sdk=h700; [ "$$p" != my285 ] || sdk=my282; \
 		$(MAKE) -s -C "$(BUILDER)" build PLATFORM=$$sdk PROJECT="$$PWD" \
 			CMD='sh -c "cd app && make PLATFORM='$$sdk' SPRUCE_RUNTIME_PLATFORM='$$p' FIRMWARE=spruce NEXTUI=/opt/nextui-src"' || exit 1; \
 	done
+	@$(MAKE) -s -C "$(BUILDER)" build PLATFORM=my282 PROJECT="$$PWD" \
+		CMD='sh app/spruce/stub-libs.sh bin/spruce/my285/stubs arm-a30-linux-gnueabihf-gcc $(SPRUCE_STUB_LIBS)' 
 	@ls -la bin/spruce/*/netplay*.elf | awk '{printf "   %-46s %s bytes\n", $$NF, $$5}'
 
-dist-spruce: $(foreach p,$(SPRUCE_PLATFORMS),check-shim-$(p) check-spruce-app-$(p)) check-netplay-cores check-udhcpd check-compatibility \
+dist-spruce: $(foreach p,$(SPRUCE_PLATFORMS),check-shim-$(if $(filter my285,$(p)),my282,$(p)) check-spruce-app-$(p)) check-netplay-cores check-udhcpd check-compatibility \
              $(DRASTIC_RADIO) \
              $(NEXTUI_SYSTEM)/.spruce-runtime
 	@rm -rf "$(SPRUCE_STAGE)" "$(SPRUCE_ARCHIVE)"
@@ -664,10 +674,16 @@ dist-spruce: $(foreach p,$(SPRUCE_PLATFORMS),check-shim-$(p) check-spruce-app-$(
 	mkdir -p "$$D/spruce_ui" && cp app/spruce/*.py app/spruce/CHEEVOS-LICENSE "$$D/spruce_ui/" && \
 	cp -R "$(NEXTUI_SYSTEM)/res" "$$D/nextui/.system/res" && \
 	for p in $(SPRUCE_PLATFORMS); do \
-		mkdir -p "$$D/bin/$$p" "$$D/cores/override/$$p" "$$D/nextui/.system/$$p/bin" && \
+		mkdir -p "$$D/bin/$$p" "$$D/nextui/.system/$$p/bin" && \
 		cp app/spruce/governor.sh "$$D/nextui/.system/$$p/bin/" && \
-		cp bin/$$p/netplay_shim.so bin/spruce/$$p/netplay.elf bin/spruce/$$p/netplay-broker.elf \
+		cp bin/spruce/$$p/netplay.elf bin/spruce/$$p/netplay-broker.elf \
 		   bin/spruce/$$p/netplay-wifips.elf "$$D/bin/$$p/" && \
+		if [ "$$p" = my285 ]; then \
+			cp -R bin/spruce/my285/stubs "$$D/bin/my285/" || exit 1; \
+			continue; \
+		fi; \
+		mkdir -p "$$D/cores/override/$$p" && \
+		cp bin/$$p/netplay_shim.so "$$D/bin/$$p/" && \
 		cp "$(DRASTIC_RADIO)" "$$D/bin/$$p/libdrastic_wifi.so" && \
 		eval libs=\$$libs_$$p; sdk=$$p; [ "$$p" != my355 ] || sdk=h700; \
 		for l in $$libs; do cp -L "$(NEXTUI_SYSTEM)/$$sdk/lib/$$l" "$$D/bin/$$p/" || exit 1; done && \
@@ -689,7 +705,7 @@ dist-spruce: $(foreach p,$(SPRUCE_PLATFORMS),check-shim-$(p) check-spruce-app-$(
 		mkdir -p "$$D/cores/compatibility" && \
 		cp -R dist/compatibility-spruce32/armv7 "$$D/cores/compatibility/"; \
 	fi && \
-	chmod 755 "$$D/launch.sh" "$$D/launcher"/* "$$D"/bin/*/*
+	chmod 755 "$$D/launch.sh" "$$D/launcher"/* && find "$$D/bin" -type f -exec chmod 755 {} +
 	@cd "$(SPRUCE_STAGE)" && zip -q -r "$(abspath $(SPRUCE_ARCHIVE))" App -x '*/.DS_Store'
 	@du -h "$(SPRUCE_ARCHIVE)"
 

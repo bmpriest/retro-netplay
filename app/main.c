@@ -1954,6 +1954,11 @@ static bool menu_pad_open(MenuPad* pad, bool grab) {
 		else if (!strcmp(PLATFORM, "my282") && !strcmp(name, "gpio-keys-polled")) {
 			pad->a = 57; pad->b = 29; pad->x = 42;
 		}
+		/* The Mini Flip's keys are a keyboard on event0, the node spruce's
+		 * PyUI itself reads, with the A30's codes. */
+		else if (!strcmp(PLATFORM, "my285") && i == 0) {
+			pad->a = 57; pad->b = 29; pad->x = 42;
+		}
 		else continue;
 		snprintf(path, sizeof(path), "/dev/input/event%d", i);
 		int fd = open(path, (grab ? O_RDONLY : O_WRONLY) | O_NONBLOCK);
@@ -2162,6 +2167,24 @@ static int ctl_result(bool ok) {
 	return ok ? 0 : 1;
 }
 
+/* Where power save changes only by reloading the driver (H700's 8821cs) or
+ * power-cycling the radio (the Mini Flip's 8188fu), and a reboot turns it back
+ * on. */
+static bool slow_powersave(void) {
+	return !strcmp(PLATFORM, "h700") || !strcmp(PLATFORM, "my285");
+}
+
+/* Before a session starts: the setting says power save off, but on those
+ * radios a reboot has put it back. Apply it again now - it takes the radio
+ * down for a few seconds, which only a session not yet started can afford. */
+static void ctl_powersave_before_session(void) {
+	if (!NS_settings()->disable_powersave || !slow_powersave() || NS_isArmed()) return;
+	if (!NS_wifiPowerSaveNeedsReload()) return;
+	char err[160] = "";
+	if (!NS_wifiPowerSaveReload(true, err, sizeof(err)))
+		fprintf(stderr, "ctl: could not turn WiFi power saving off again: %s\n", err);
+}
+
 static int ctl_main(int argc, char* argv[]) {
 	/* --protocol may appear anywhere after the command; take it out so the
 	 * positional arguments stay where each command expects them. */
@@ -2274,6 +2297,7 @@ static int ctl_main(int argc, char* argv[]) {
 
 	if (!strcmp(cmd, "join-peer")) {
 		if (argc < 3 || NS_isArmed()) return ctl_result(false);
+		ctl_powersave_before_session();
 		join_protocol_override = -1;
 		join_peer_protocol = !strcmp(argv[2], "retroarch") ? NS_PROTO_RETROARCH : NS_PROTO_LINKPLAY;
 		const char* ip = arg;
@@ -2341,6 +2365,7 @@ static int ctl_main(int argc, char* argv[]) {
 			snprintf(status, sizeof(status), "already armed");
 			return ctl_result(false);
 		}
+		ctl_powersave_before_session();
 		if (adhoc) {
 			if (!NS_canHostAdhoc()) {
 				snprintf(status, sizeof(status), "this device cannot host ad hoc");
@@ -2369,6 +2394,7 @@ static int ctl_main(int argc, char* argv[]) {
 			snprintf(status, sizeof(status), "already armed");
 			return ctl_result(false);
 		}
+		ctl_powersave_before_session();
 		NS_Peer peer;
 		memset(&peer, 0, sizeof(peer));
 		bool discover = !strcmp(arg, "discover");
@@ -2456,10 +2482,10 @@ static int ctl_main(int argc, char* argv[]) {
 			/* Restore puts back what was recorded before a session, which on
 			 * a device someone had switched off by hand is off: a test asking
 			 * for power save on has to get it. */
-			if (strcmp(PLATFORM, "h700")) NS_wifiPowerSaveRadio(true);
-			/* The app leaves an H700 at power save off until the next boot;
-			 * a test run cannot wait for one. */
-			if (!strcmp(PLATFORM, "h700") && !NS_wifiPowerSaveNeedsReload() &&
+			if (!slow_powersave()) NS_wifiPowerSaveRadio(true);
+			/* The app leaves an H700 (or a Mini Flip) at power save off until
+			 * the next boot; a test run cannot wait for one. */
+			if (slow_powersave() && !NS_wifiPowerSaveNeedsReload() &&
 			    !NS_wifiPowerSaveReload(false, status, sizeof(status))) {
 				NS_settingsSave();
 				return ctl_result(false);

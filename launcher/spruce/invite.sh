@@ -32,7 +32,7 @@ log() { echo "[$(date '+%F %T')] $*" >> "$LOG"; }
 # spruce's own device name is what PLATFORM holds.
 netplay_platform() {
 	case "$PLATFORM" in
-		tg5040|tg5050|h700|my355|my282) echo "$PLATFORM" ;;
+		tg5040|tg5050|h700|my355|my282|my285) echo "$PLATFORM" ;;
 		*) . "$SDCARD_PATH/spruce/scripts/helperFunctions.sh" >/dev/null 2>&1
 		   np_spruce_platform "$PLATFORM" ;;
 	esac

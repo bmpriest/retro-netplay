@@ -56,6 +56,9 @@ SHIM_PLATFORM="$PLATFORM"
 case "$(basename "$0")" in
 	ra32*) SHIM_PLATFORM=my282 ;;
 esac
+# The Mini Flip runs the A30's armv7 shim and cores; spruce starts its
+# RetroArch as RetroArch/retroarch (ra32.mini bound there at boot).
+[ "$PLATFORM" = my285 ] && SHIM_PLATFORM=my282
 RA32_OVERLAY=
 if [ "$SHIM_PLATFORM" != "my282" ] && [ -n "$NETPLAY_SESSION" ] &&
    grep -q '^compat_ra32=1$' "$NETPLAY_SESSION" 2>/dev/null; then
