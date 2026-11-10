@@ -1184,11 +1184,199 @@ static void core_socket_deadline(int fd, long budget_ms) {
 
 static uint32_t instanced_available_mask(void);
 
+/* armGBA's link options, agreed at arm time.
+ *
+ * armGBA reads its Link options once, when the game opens ("Applies on
+ * Restart"), and Link Mode also decides the shim's path: Together shares
+ * inputs and state, Separate carries the cable. Two devices that open the
+ * game with different values cannot be reconciled afterwards - the guest
+ * once ran Together against a host running Separate. So each side sends the
+ * values in its own option file with the manifest, both work out the same
+ * agreement from the two (the host's wins; see agree_link_options), and both
+ * session files carry it. The shim forces those values into the core before
+ * the game loads and checks them again against the host's on connection.
+ *
+ * Sent only when the peer can read it: the bit below rides in the instanced
+ * mask, which an older build ignores (it masks the bits it knows), and a
+ * block follows the manifest only from a sender that set the bit. */
+#define INST_CAP_LINKOPTS (1u << 31)
+#define LINKOPTS_MAX 1024
+
+static const char* const ARMGBA_LINK_KEYS[] = {
+	"armgba_link_mode", "armgba_link_players", "armgba_link_port",
+	"armgba_gb_link_port", "armgba_gb_link_timing", "armgba_gb_model",
+};
+#define ARMGBA_LINK_KEY_COUNT (sizeof(ARMGBA_LINK_KEYS) / sizeof(ARMGBA_LINK_KEYS[0]))
+
+static char local_link_opts[LINKOPTS_MAX + 1];
+static char peer_link_opts[LINKOPTS_MAX + 1];
+static bool peer_link_opts_present;
+
+/* key = "value" lines, as RetroArch writes core options. */
+static bool opt_file_value(const char* path, const char* key, char* out, size_t cap) {
+	FILE* f = fopen(path, "r");
+	if (!f) return false;
+	char line[512];
+	size_t kl = strlen(key);
+	bool found = false;
+	while (!found && fgets(line, sizeof(line), f)) {
+		char* p = line;
+		while (*p == ' ' || *p == '\t') p++;
+		if (strncmp(p, key, kl)) continue;
+		p += kl;
+		while (*p == ' ' || *p == '\t') p++;
+		if (*p++ != '=') continue;
+		while (*p == ' ' || *p == '\t') p++;
+		if (*p == '"') p++;
+		size_t n = strcspn(p, "\"\r\n");
+		if (!n || n >= cap) continue;
+		memcpy(out, p, n);
+		out[n] = '\0';
+		found = true;
+	}
+	fclose(f);
+	return found;
+}
+
+/* This device's values, as "key=value\n" lines; a key no file sets is left
+ * out (the core's own default applies). The same files, in the same order,
+ * that launcher/common/core-route.sh reads. */
+static void read_local_link_opts(void) {
+	char files[2][512];
+	snprintf(files[0], sizeof(files[0]), "%s/RetroArch/.retroarch/config/armGBA/armGBA.opt", ns_sd);
+	snprintf(files[1], sizeof(files[1]), "%s/RetroArch/.retroarch/retroarch-core-options.cfg", ns_sd);
+	size_t n = 0;
+	local_link_opts[0] = '\0';
+	for (size_t k = 0; k < ARMGBA_LINK_KEY_COUNT; k++) {
+		char v[64];
+		bool got = false;
+		for (int i = 0; i < 2 && !got; i++) got = opt_file_value(files[i], ARMGBA_LINK_KEYS[k], v, sizeof(v));
+		if (!got) continue;
+		int w = snprintf(local_link_opts + n, sizeof(local_link_opts) - n, "%s=%s\n",
+		                 ARMGBA_LINK_KEYS[k], v);
+		if (w < 0 || (size_t)w >= sizeof(local_link_opts) - n) break;
+		n += (size_t)w;
+	}
+}
+
+static bool link_opt_value(const char* text, const char* key, char* out, size_t cap) {
+	size_t kl = strlen(key);
+	for (const char* p = text; p && *p; ) {
+		const char* end = strchr(p, '\n');
+		size_t len = end ? (size_t)(end - p) : strlen(p);
+		if (len > kl && !strncmp(p, key, kl) && p[kl] == '=') {
+			size_t vl = len - kl - 1;
+			if (!vl || vl >= cap) return false;
+			memcpy(out, p + kl + 1, vl);
+			out[vl] = '\0';
+			return true;
+		}
+		p = end ? end + 1 : NULL;
+	}
+	return false;
+}
+
+static bool link_mode_plays(const char* v) {
+	return !strcmp(v, "together") || !strcmp(v, "separate");
+}
+
+/* The same answer on both devices, from the same two texts. The host's value
+ * wins wherever it set one, else the guest's, else neither is written and the
+ * core's default applies on both. Link Mode is the exception: Off and
+ * GameCube cannot play over Netplay, so a host left on either takes the
+ * guest's Together or Separate, and with neither it is Separate, which needs
+ * nothing from the frontend (the shim's own default). */
+static void agree_link_options(const char* host, const char* guest, char* out, size_t cap) {
+	size_t n = 0;
+	out[0] = '\0';
+	for (size_t k = 0; k < ARMGBA_LINK_KEY_COUNT; k++) {
+		const char* key = ARMGBA_LINK_KEYS[k];
+		char hv[64] = "", gv[64] = "";
+		bool hs = link_opt_value(host, key, hv, sizeof(hv));
+		bool gs = link_opt_value(guest, key, gv, sizeof(gv));
+		const char* v;
+		if (!strcmp(key, "armgba_link_mode"))
+			v = hs && link_mode_plays(hv) ? hv : gs && link_mode_plays(gv) ? gv : "separate";
+		else
+			v = hs ? hv : gs ? gv : NULL;
+		if (hs != gs || (hs && strcmp(hv, gv)) || (v && hs && strcmp(v, hv)))
+			ns_log("armGBA %s: host=%s guest=%s -> %s\n", key,
+			       hs ? hv : "(unset)", gs ? gv : "(unset)", v ? v : "(core default)");
+		if (!v) continue;
+		int w = snprintf(out + n, cap - n, "%s=%s\n", key, v);
+		if (w < 0 || (size_t)w >= cap - n) break;
+		n += (size_t)w;
+	}
+}
+
+/* Rewrites only the armGBA lines: armgba_link_mode= for the shim's path,
+ * option.<key>= for the values the shim forces into the core, and
+ * armgba_link_agreed= so a launch can tell an agreement from a session armed
+ * by a build that had none. agreed NULL removes them. */
+static bool write_link_options_file(const char* path, const char* agreed) {
+	char tmp[560];
+	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+	FILE* in = fopen(path, "r");
+	if (!in) return false;
+	FILE* out = fopen(tmp, "w");
+	if (!out) { fclose(in); return false; }
+	char line[512];
+	while (fgets(line, sizeof(line), in))
+		if (strncmp(line, "option.armgba_", 14) &&
+		    strncmp(line, "armgba_link_mode=", 17) &&
+		    strncmp(line, "armgba_link_agreed=", 19)) fputs(line, out);
+	if (agreed) {
+		char mode[64] = "separate";
+		link_opt_value(agreed, "armgba_link_mode", mode, sizeof(mode));
+		fprintf(out, "armgba_link_mode=%s\n", mode);
+		for (const char* p = agreed; *p; ) {
+			const char* end = strchr(p, '\n');
+			size_t len = end ? (size_t)(end - p) : strlen(p);
+			fprintf(out, "option.%.*s\n", (int)len, p);
+			p = end ? end + 1 : p + len;
+		}
+		fprintf(out, "armgba_link_agreed=1\n");
+	}
+	fclose(in);
+	if (fclose(out) != 0 || rename(tmp, path) != 0) {
+		remove(tmp);
+		return false;
+	}
+	return true;
+}
+
+static bool settle_link_options(bool we_host) {
+	char agreed[LINKOPTS_MAX + 1];
+	const char* use = NULL;
+	if (peer_link_opts_present) {
+		agree_link_options(we_host ? local_link_opts : peer_link_opts,
+		                   we_host ? peer_link_opts : local_link_opts,
+		                   agreed, sizeof(agreed));
+		use = agreed;
+		char mode[64] = "separate";
+		link_opt_value(agreed, "armgba_link_mode", mode, sizeof(mode));
+		int values = 0;
+		for (const char* q = agreed; *q; q++) values += *q == '\n';
+		ns_log("armGBA link options agreed: mode=%s (%d values)\n", mode, values);
+	} else {
+		ns_log("armGBA link options: peer sent none (older build); each device uses its own\n");
+	}
+	char path[512];
+	bool ok = true;
+	snprintf(path, sizeof(path), "%s/session.conf", ns_state);
+	ok &= write_link_options_file(path, use);
+	snprintf(path, sizeof(path), "%s/session", ns_state);
+	ok &= write_link_options_file(path, use);
+	if (!ok) ns_log("cannot write the armGBA link options into the session\n");
+	return ok;
+}
+
 static bool send_manifest_to(int fd, NS_CoreInfo* m, int n, long budget_ms) {
+	read_local_link_opts();
 	uint32_t hdr[5] = { htonl(CORE_MAGIC), htonl((uint32_t)n),
 	                    htonl(NS_settings()->compatibility_cores ? 1u : 0u),
 	                    htonl(NS_settings()->force_compatibility ? 1u : 0u),
-	                    htonl(instanced_available_mask()) };
+	                    htonl(instanced_available_mask() | INST_CAP_LINKOPTS) };
 	if (!io_all_to(fd, hdr, sizeof(hdr), true, budget_ms)) return false;
 	for (int i = 0; i < n; i++) {
 		CoreWire w;
@@ -1204,7 +1392,10 @@ static bool send_manifest_to(int fd, NS_CoreInfo* m, int n, long budget_ms) {
 		w.compat_available = m[i].compat_available ? 1 : 0;
 		if (!io_all_to(fd, &w, sizeof(w), true, budget_ms)) return false;
 	}
-	return true;
+	uint32_t len = (uint32_t)strlen(local_link_opts);
+	uint32_t wire_len = htonl(len);
+	return io_all_to(fd, &wire_len, sizeof(wire_len), true, budget_ms) &&
+	       (!len || io_all_to(fd, local_link_opts, len, true, budget_ms));
 }
 
 static int recv_manifest_to(int fd, NS_CoreInfo* out, int max, long budget_ms,
@@ -1217,7 +1408,10 @@ static int recv_manifest_to(int fd, NS_CoreInfo* out, int max, long budget_ms,
 	int n = (int)ntohl(hdr[1]);
 	*peer_compat_enabled = ntohl(hdr[2]) != 0;
 	*peer_force_compatibility = ntohl(hdr[3]) != 0;
-	*peer_instanced = ntohl(hdr[4]);
+	*peer_instanced = ntohl(hdr[4]) & ~INST_CAP_LINKOPTS;
+	bool link_block = (ntohl(hdr[4]) & INST_CAP_LINKOPTS) != 0;
+	peer_link_opts_present = false;
+	peer_link_opts[0] = '\0';
 	if (n < 0 || n > NS_MAX_MANIFEST) return -1;
 
 	int kept = 0;
@@ -1239,6 +1433,15 @@ static int recv_manifest_to(int fd, NS_CoreInfo* out, int max, long budget_ms,
 		out[kept].installed = w.installed != 0;
 		out[kept].compat_available = w.compat_available != 0;
 		kept++;
+	}
+	if (link_block) {
+		uint32_t len = 0;
+		if (!io_all_to(fd, &len, sizeof(len), false, budget_ms)) return -1;
+		len = ntohl(len);
+		if (len > LINKOPTS_MAX) return -1;
+		if (len && !io_all_to(fd, peer_link_opts, len, false, budget_ms)) return -1;
+		peer_link_opts[len] = '\0';
+		peer_link_opts_present = true;
 	}
 	return kept;
 }
@@ -1398,6 +1601,22 @@ static int select_compatibility(NS_CoreInfo* mine, int mn, NS_CoreInfo* theirs, 
 		if (theirs[i].machine == 183) peer_64 = true;       /* EM_AARCH64 */
 	}
 	bool ra32 = !local_32 && peer_32 && !peer_64;
+	/* Test override: keep this 64-bit device on its own word size against a
+	 * 32-bit peer, to measure native 64<->32 play (pairs with the shim's
+	 * relaxed_core_identity). A hand-written native_word_size=1 line in
+	 * session.conf survives every rewrite here. */
+	if (ra32) {
+		char conf[512], line[128];
+		snprintf(conf, sizeof(conf), "%s/session.conf", ns_state);
+		FILE* f = fopen(conf, "r");
+		while (f && fgets(line, sizeof(line), f))
+			if (!strncmp(line, "native_word_size=1", 18)) {
+				ra32 = false;
+				ns_log("TEST: native_word_size=1 - staying 64-bit against a 32-bit peer\n");
+				break;
+			}
+		if (f) fclose(f);
+	}
 	ns_log("word size: local=%s peer32=%d peer64=%d -> compat_ra32=%d\n",
 	       local_32 ? "armv7" : "aarch64", peer_32, peer_64, ra32);
 
@@ -1502,6 +1721,7 @@ void NS_compatServeTick(void) {
 		ns_log("core compatibility negotiation: could not activate selections\n");
 	else
 		ns_log("core compatibility negotiation: %d fallback(s) selected\n", selected);
+	settle_link_options(true);
 
 	close(fd);
 }
@@ -1575,6 +1795,10 @@ int NS_compatSync(const char* host_ip, char* err, int errlen) {
 		snprintf(err, errlen, "forced compatibility core unavailable");
 	else if (selected < 0)
 		snprintf(err, errlen, "cannot activate core selection");
+	else if (!settle_link_options(false)) {
+		snprintf(err, errlen, "cannot write the agreed armGBA options");
+		selected = -1;
+	}
 
 	close(fd);
 

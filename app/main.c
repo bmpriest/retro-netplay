@@ -2110,6 +2110,8 @@ static int nudge_main(void) {
  *   --ctl peers [SECONDS]          one tab-separated line per discovered host
  *   --ctl join-peer IP PROTOCOL [SSID PSK]
  *   --ctl checks | cores | settings | off | restore-wifi
+ *   --ctl sync                     guest: compare cores and agree armGBA's link
+ *                                  options with the host again, as joining did
  */
 static void ctl_print_status(void) {
 	NS_SessionInfo si;
@@ -2255,6 +2257,41 @@ static int ctl_main(int argc, char* argv[]) {
 		}
 		do_arm(NS_ROLE_CLIENT, ip);
 		return ctl_result(NS_isArmed());
+	}
+
+	if (!strcmp(cmd, "sync")) {
+		/* Joining settles the builds and armGBA's link options once. Option
+		 * files edited after that (a test writing armGBA.opt) need it again
+		 * before the game opens. The host's broker answers at any time. */
+		char path[512], line[256], peer[64] = "";
+		bool client = false;
+		snprintf(path, sizeof(path), "%s/session", NS_statePath());
+		FILE* f = fopen(path, "r");
+		if (f) {
+			while (fgets(line, sizeof(line), f)) {
+				line[strcspn(line, "\r\n")] = '\0';
+				if (!strcmp(line, "role=client")) client = true;
+				else if (!strncmp(line, "peer=", 5)) snprintf(peer, sizeof(peer), "%s", line + 5);
+			}
+			fclose(f);
+		}
+		if (!client || !peer[0]) {
+			snprintf(status, sizeof(status), "sync needs a joined session");
+			return ctl_result(false);
+		}
+		char cerr[128] = "";
+		int selected = NS_compatSync(peer, cerr, sizeof(cerr));
+		if (selected < 0) {
+			snprintf(status, sizeof(status), "%s", cerr);
+			return ctl_result(false);
+		}
+		if ((f = fopen(path, "r"))) {
+			while (fgets(line, sizeof(line), f))
+				if (!strncmp(line, "armgba_link_", 12) || !strncmp(line, "option.armgba_", 14))
+					fputs(line, stdout);
+			fclose(f);
+		}
+		return ctl_result(true);
 	}
 
 	if (!strcmp(cmd, "off")) {

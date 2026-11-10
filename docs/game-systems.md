@@ -266,16 +266,37 @@ netpacket interface, so the shim carries its cable (and Wireless Adapter)
 traffic exactly as it does gpSP's; its **Together** mode runs every
 console (two to four) on every device and expects the frontend to
 exchange controller inputs, which is the shim's shared-screen path. The
-mode is the core's own `armgba_link_mode` option: the launcher reads it
-from the frontend's option file and the shim follows it, answers the
-core's netplay client-index query (host 0, guest 1), and runs the
-built-in BIOS on both devices. Players should set Number of Players to
-the number of devices for netplay. On NextUI the core is not bundled;
+mode is the core's own `armgba_link_mode` option, and armGBA reads it and
+its other link options only when the game opens, so both devices must
+open it with the same values. Joining settles that: each device sends
+Link Mode, Number of Players, both link ports, Game Boy link timing and
+Game Boy model from its own option file, the host's values win (a host
+on Off or GameCube takes the guest's Together or Separate, else
+Separate), and both session files carry the result
+(`armgba_link_mode=`, `option.armgba_*=`). The shim forces those values
+into the core before the game loads, and the guest checks Link Mode once
+more against the host's when they connect: if they differ (a session
+edited after joining) it refuses to play and says so rather than run one
+side Together and the other Separate. Changing the option after joining
+needs a rejoin (or `ctl.sh sync` on the guest). The shim also answers
+the core's netplay client-index query (host 0, guest 1) and runs the
+built-in BIOS on both devices. In Together each device shows and plays
+only its own console (host player 1, guest player 2): the shim sets
+Screen Layout to that player, keeps L2/R2 (which change the layout)
+from leaving the device, and turns the controller-switch combo off.
+Players should set Number of Players to the number of devices for
+netplay. On NextUI the core is not bundled;
 a pak that ships `armgba_libretro.so` is routed the same way. Both
 modes are device-proven on two spruce handhelds: Separate carried a
 full Advance Wars 2 turn exchange and Tetris and Super Mario Bros.
-Deluxe matches, Together kept Mario Kart, Tetris and Super Mario Bros.
-Deluxe in shared-screen sync at 60 fps. (Tetris DX's own link probe
+Deluxe matches. Together, with each device on its own console, played
+two-player Mario Kart (VS race), Tetris and Super Mario Bros. Deluxe
+between a spruce RG35XXH and a spruce Brick at 57-58 fps with every
+checkpoint agreed. Between a 32-bit A30 and a 64-bit device Together
+cannot work for Game Boy games: the two builds' states differ in size
+(Tetris 841924 vs 843364 bytes), and the guest refuses at connection.
+armGBA's 32-bit build also needs an 8-byte-aligned buffer to save a
+state into (it faulted on the A30 otherwise); the shim hands it one. (Tetris DX's own link probe
 did not engage in Separate; the same games link in Together.) Exact
 GBA link timing floods progress grants, so the shim drains up to 512
 packets a frame and never freezes armGBA in its starved-link dialog:
