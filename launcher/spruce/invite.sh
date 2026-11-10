@@ -14,7 +14,7 @@
 #
 #   A  Play           queue the game the way PyUI does, then end the menu so
 #                     spruce's loop runs it
-#   B  Not now        resume the menu where it was, and nudge it to repaint
+#   B  Not now        resume the menu where it was, on the screen it left
 #   X  Browse SYSTEM  point PyUI's saved position at the game, or the nearest
 #                     one this device has, and end the menu: spruce reopens it
 #                     there (several seconds: PyUI's own start-up)
@@ -97,24 +97,21 @@ receive() {
 	else accept= text="$title ($core) - not on this device"
 	fi
 
-	plat=$(netplay_platform) || return 0
 	pak=$NETPLAY_PAK
-	SYSTEM_PATH=$pak/nextui/.system/$plat
-	USERDATA_PATH=$pak/nextui/.userdata/$plat
-	SHARED_USERDATA_PATH=$pak/nextui/.userdata/shared
-	LOGS_PATH=$NETPLAY_LOGS
-	HOME=$USERDATA_PATH
-	LD_LIBRARY_PATH=$pak/bin/$plat:${LD_LIBRARY_PATH:-}
-	PLATFORM=$plat
-	LD_LIBRARY_PATH=$(np_spruce_engine_libraries) || { log "missing Spruce SDL runtime"; return 0; }
-	export PLATFORM SYSTEM_PATH USERDATA_PATH SHARED_USERDATA_PATH LOGS_PATH HOME LD_LIBRARY_PATH
 
+	# Drawn by Netplay's PyUI front end in spruce's own theme; netplay.elf
+	# holds the pad meanwhile, so the paused menu never sees the answer.
 	kill -STOP "$menu"
-	cd "$pak" || { kill -CONT "$menu"; return 1; }
-	"$pak/bin/$plat/netplay.elf" --prompt --title "$nick invites you to play" --text "$text" \
+	# The menu only repaints what changes when it resumes, so give it back
+	# the screen it left: every page of the framebuffer, since it may be
+	# showing any of them.
+	saved_screen=/tmp/netplay-invite.fb
+	cat /dev/fb0 > "$saved_screen" 2>/dev/null || rm -f "$saved_screen"
+	(cd "$pak" && sh "$pak/launch.sh" --invite --title "$nick invites you to play" --text "$text" \
 		${art:+--art "$art"} --accept "$accept" --decline "NOT NOW" --browse "BROWSE $label" \
-		--timeout 60 > /dev/null 2>> "$LOG"
+		--timeout 60) > /dev/null 2>> "$LOG"
 	answer=$?
+	trap 'rmdir /tmp/netplay-invite.lock 2>/dev/null; rm -f "$saved_screen"' EXIT
 	case $answer in
 	0)
 		log "accepted $rel from $nick"
@@ -132,8 +129,11 @@ receive() {
 		;;
 	*)
 		log "declined $rel from $nick ($answer)"
+		# No nudge: the restored screen is the repaint, and a press could move
+		# the selection (the first one only wakes spruce's screensaver, which
+		# the paused time may have brought on).
+		[ -s "$saved_screen" ] && cat "$saved_screen" > /dev/fb0 2>/dev/null
 		kill -CONT "$menu"
-		"$pak/bin/$plat/netplay.elf" --nudge
 		;;
 	esac
 }

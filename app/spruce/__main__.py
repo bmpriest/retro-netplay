@@ -20,6 +20,7 @@ FOOTER_CONTEXT = None
 GLYPH_SCRATCH = None
 CORE_RESULTS: dict[str, tuple[bool, str]] = {}
 CORE_READY = threading.Event()
+PROMPTING = False
 
 
 def control(*args: str) -> str:
@@ -98,14 +99,16 @@ def bootstrap() -> None:
     generated.use_scratch(Path(GLYPH_SCRATCH.name))
     original = Display.bottom_bar.render_bottom_bar
 
-    def bottom_bar(bottom_bar_text=None, render_bottom_bar_icons_and_images=True):
+    def bottom_bar(bottom_bar_text=None, render_bottom_bar_icons_and_images=True, **more):
         from . import footer
         # Leave native keyboard prompts alone when no Netplay menu owns them.
+        # Newer PyUI passes more keywords (bottom_bar_hints); hand them on.
         if FOOTER_CONTEXT is None and bottom_bar_text is not None:
-            return original(bottom_bar_text, render_bottom_bar_icons_and_images)
-        original(bottom_bar_text=None, render_bottom_bar_icons_and_images=False)
+            return original(bottom_bar_text, render_bottom_bar_icons_and_images, **more)
+        original(bottom_bar_text=None, render_bottom_bar_icons_and_images=False, **more)
         left = FOOTER_CONTEXT() if FOOTER_CONTEXT else footer.hints(HINT)
-        footer.render(left, session_active() and HINT != "PLEASE WAIT",
+        # An invitation's X is Browse, not End session.
+        footer.render(left, session_active() and HINT != "PLEASE WAIT" and not PROMPTING,
                       HINT if not left else "")
 
     Display.bottom_bar.render_bottom_bar = bottom_bar
@@ -550,6 +553,74 @@ def main_menu() -> bool:
     return True
 
 
+def start_prompt_input(args: dict[str, str]) -> subprocess.Popen:
+    """The answer comes from netplay.elf, which holds the pad exclusively while
+    we ask: spruce's menu is only paused, and through SDL we could not keep our
+    presses out of its queue. Started before PyUI so nothing pressed meanwhile
+    reaches the menu."""
+    env = os.environ.copy()
+    if engine_libraries := env.get("NETPLAY_ENGINE_LD_LIBRARY_PATH"):
+        env["LD_LIBRARY_PATH"] = engine_libraries
+    command = [str(ENGINE), "--prompt", "--input-only", "1",
+               "--accept", args.get("accept", ""), "--decline", args.get("decline", "NOT NOW"),
+               "--browse", args.get("browse", ""), "--timeout", args.get("timeout", "60")]
+    return subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+
+
+def invite(args: dict[str, str], answer: subprocess.Popen) -> int:
+    """A game invitation over spruce's paused menu, in spruce's own look."""
+    global FOOTER_CONTEXT, PROMPTING
+    import time
+    from devices.device import Device
+    from display.display import Display
+    from display.font_purpose import FontPurpose
+    from display.render_mode import RenderMode
+    from display.resize_type import ResizeType
+    from themes.theme import Theme
+    from .buttons import Button
+
+    left = [(Button.B, args.get("decline", "NOT NOW"))]
+    if args.get("accept"):
+        left.append((Button.A, args["accept"]))
+    if args.get("browse"):
+        left.append((Button.X, args["browse"]))
+    FOOTER_CONTEXT, PROMPTING = (lambda: left), True
+    width = int(Device.get_device().screen_width())
+    height = int(Device.get_device().screen_height())
+    deadline = time.monotonic() + int(args.get("timeout", "60"))
+    art = args.get("art", "")
+    shown = None
+    while answer.poll() is None:
+        remaining = max(0, int(deadline - time.monotonic() + 0.999))
+        if remaining != shown:
+            shown = remaining
+            Display.clear(args.get("title", "Invitation"))
+            top = Display.get_top_bar_height()
+            bottom = height - Display.get_bottom_bar_height()
+            usable = bottom - top
+            y = top + usable // 20
+            if art and os.path.isfile(art):
+                box = int(usable * 0.55)
+                Display.render_image(art, width // 2, y, RenderMode.TOP_CENTER_ALIGNED,
+                                     int(width * 0.8), box, ResizeType.FIT)
+                y += box + usable // 25
+            else:
+                y = top + usable // 3
+            lines = Display.split_message(args.get("text", ""), FontPurpose.LIST,
+                                          clip_to_device_width=True)
+            if art and os.path.isfile(art):
+                Display.write_message_multiline_starting_height_specified(lines, y)
+            else:
+                Display.write_message_multiline(lines, y)
+            Display.render_text(f"Closes in {remaining} s", width // 2, bottom - usable // 20,
+                                Theme.text_color(FontPurpose.DESCRIPTIVE_LIST_DESCRIPTION),
+                                FontPurpose.DESCRIPTIVE_LIST_DESCRIPTION,
+                                RenderMode.BOTTOM_CENTER_ALIGNED)
+            Display.present()
+        time.sleep(0.05)
+    return answer.returncode
+
+
 def run() -> None:
     if not onboarding(): return
     while True:
@@ -562,6 +633,19 @@ def run() -> None:
 def main() -> int:
     STATE.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(filename=str(STATE / "pyui.log"), level=logging.INFO)
+    if len(sys.argv) > 1 and sys.argv[1] == "--invite":
+        # --invite --title T --text X [--art P] [--accept L] [--decline L]
+        #          [--browse L] [--timeout S]: exits as netplay.elf --prompt does
+        # (0 accept, 1 decline, 2 timeout, 3 browse).
+        opts = sys.argv[2:]
+        args = {opts[i][2:]: opts[i + 1] for i in range(0, len(opts) - 1, 2)}
+        answer = start_prompt_input(args)
+        try:
+            bootstrap()
+            return invite(args, answer)
+        except Exception:
+            logging.exception("PyUI invitation failed; waiting for the answer anyway")
+            return answer.wait()
     try:
         bootstrap()
         warm_cores()

@@ -1948,6 +1948,12 @@ static bool menu_pad_open(MenuPad* pad, bool grab) {
 		else if (!strcmp(name, "TRIMUI Player1")) { pad->a = 305; pad->b = 304; pad->x = 308; }
 		else if (!strcmp(name, "MIYOO Player1")) { pad->a = 305; pad->b = 304; pad->x = 308; }
 		else if (!strcmp(name, "retrogame_joypad")) { pad->a = 305; pad->b = 304; pad->x = 307; }
+		/* The A30's buttons are keys on gpio-keys-polled; spruce's joypad
+		 * daemon turns them into the pad its menu reads, so holding the
+		 * source holds the menu's input too. */
+		else if (!strcmp(PLATFORM, "my282") && !strcmp(name, "gpio-keys-polled")) {
+			pad->a = 57; pad->b = 29; pad->x = 42;
+		}
 		else continue;
 		snprintf(path, sizeof(path), "/dev/input/event%d", i);
 		int fd = open(path, (grab ? O_RDONLY : O_WRONLY) | O_NONBLOCK);
@@ -1991,14 +1997,20 @@ static int menu_pad_read(MenuPad* pad, int timeout_ms) {
  * it is on screen as soon as the display is up. An empty --accept hides A (the
  * game is not on this device); --browse adds X. Prints accept, decline, browse
  * or timeout; exits 0, 1, 3 or 2. The caller owns whatever frontend it
- * covered, and pauses it first: the menu pad is grabbed while we ask. */
+ * covered, and pauses it first: the menu pad is grabbed while we ask.
+ *
+ * --input-only 1 draws nothing and only reads the answer from the grabbed
+ * pad: spruce's invitation is drawn by Netplay's PyUI front end, which
+ * reads input through SDL and so cannot keep it from the paused menu. */
 static int prompt_main(int argc, char* argv[]) {
 	struct timespec t0;
 	clock_gettime(CLOCK_MONOTONIC, &t0);
 	const char *title = "", *text = "", *art_path = NULL;
 	const char *accept = "PLAY", *decline = "DECLINE", *browse = "";
 	int timeout_s = 60;
+	bool input_only = false;
 	for (int i = 0; i + 1 < argc; i += 2) {
+		if (!strcmp(argv[i], "--input-only")) input_only = atoi(argv[i + 1]) != 0;
 		if (!strcmp(argv[i], "--title")) title = argv[i + 1];
 		else if (!strcmp(argv[i], "--text")) text = argv[i + 1];
 		else if (!strcmp(argv[i], "--art")) art_path = argv[i + 1];
@@ -2006,6 +2018,21 @@ static int prompt_main(int argc, char* argv[]) {
 		else if (!strcmp(argv[i], "--decline")) decline = argv[i + 1];
 		else if (!strcmp(argv[i], "--browse")) browse = argv[i + 1];
 		else if (!strcmp(argv[i], "--timeout")) timeout_s = atoi(argv[i + 1]);
+	}
+
+	if (input_only) {
+		MenuPad pad;
+		if (!menu_pad_open(&pad, true)) return 2;
+		int result = 2;
+		while (elapsed_since_ms(&t0) < timeout_s * 1000L) {
+			int button = menu_pad_read(&pad, 50);
+			if (button == 'a' && accept[0]) { result = 0; break; }
+			if (button == 'b') { result = 1; break; }
+			if (button == 'x' && browse[0]) { result = 3; break; }
+		}
+		printf("%s\n", result == 0 ? "accept" : result == 1 ? "decline" : result == 3 ? "browse" : "timeout");
+		menu_pad_close(&pad);
+		return result;
 	}
 
 #ifdef NETPLAY_SPRUCE

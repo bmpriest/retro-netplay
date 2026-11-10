@@ -35,11 +35,14 @@ mkdir -p "$USERDATA_PATH" "$SHARED_USERDATA_PATH" "$NETPLAY_STATE" "$NETPLAY_LOG
 
 cd "$DIR" || exit 1
 LOG="$NETPLAY_LOGS/netplay.txt"
-[ -f "$LOG" ] && mv -f "$LOG" "$NETPLAY_LOGS/netplay.1.txt"
+# Only opening the app starts a new log: invitations and other calls run
+# while it is closed and keep the last one as it is.
+[ $# -eq 0 ] && [ -f "$LOG" ] && mv -f "$LOG" "$NETPLAY_LOGS/netplay.1.txt"
 
-# The native binary remains the control plane and still serves headless and
-# invitation-prompt calls. The regular Apps entry uses spruce's own PyUI.
+# The native binary remains the control plane and still serves headless
+# calls. The Apps entry and game invitations use spruce's own PyUI.
 case "$1" in
+	--invite) ;;
 	--*) exec "$DIR/bin/$PLATFORM/netplay.elf" "$@" >> "$LOG" 2>&1 ;;
 esac
 
@@ -80,9 +83,10 @@ case "$SPRUCE_PLATFORM" in
 		NETPLAY_PYUI_DEVICE=MIYOO_FLIP
 		;;
 	A30)
-		# 32-bit device: PyUI runs on spruce's own python (get_python_path,
-		# already assigned above), not the aarch64 flip MainUI binary.
-		PYSDL2_DLL_PATH=$SDCARD_PATH/App/PyUI/dll
+		# 32-bit device: PyUI runs on spruce's own 32-bit python and SDL, as
+		# App/PyUI/launch.sh sets them up; App/PyUI/dll is aarch64.
+		PYTHON=$SDCARD_PATH/spruce/bin/python/bin/MainUI
+		PYSDL2_DLL_PATH=$SDCARD_PATH/spruce/a30/sdl2
 		NETPLAY_PYUI_DEVICE=MIYOO_A30
 		;;
 	RGB30|RGB20SX|Miniloong)
@@ -101,8 +105,10 @@ export PYSDL2_DLL_PATH LD_LIBRARY_PATH SDL_JOYSTICK_DISABLE_UDEV SDL_VIDEODRIVER
 PYTHONPATH=$DIR
 export PYTHONPATH
 cd "$RUN_DIR" || cd "$DIR" || exit 1
-"$PYTHON" -m spruce_ui >> "$LOG" 2>&1
+"$PYTHON" -m spruce_ui "$@" >> "$LOG" 2>&1
 rc=$?
+# An invitation's exit status is its answer.
+[ "$1" = --invite ] && exit "$rc"
 if [ "$rc" -ne 0 ]; then
 	/mnt/SDCARD/App/PyUI/launch.sh -msgDisplay "Netplay could not start. See Saves/netplay/pyui.log." -msgDisplayTimeMs 5000
 fi
