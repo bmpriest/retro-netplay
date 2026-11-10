@@ -1,18 +1,26 @@
-# Tetris - armGBA Separate link mode (one console per device, cable over
-# netpacket). Same menu flow as tetris.test; judged by check.sh link on the
-# shim logs, not screenshots, so it runs on platforms without references.
-#
-# spruce-core picks armgba for this ROM on both devices; the core option
-# file selects Separate before the core loads. Both are put back after.
+# Tetris - armGBA Separate, 2PLAYER over the link cable.
+# One console per device.
+# Each device takes its own console to 2PLAYER; the host starts, both pick a
+# height, the host starts the game. Judged by check.sh link; the -vs
+# screens must show MARIO VS. LUIGI, which Tetris shows only when linked.
 
 all:WAIT_FOR devbridge 30000
 #spruce all:TRM sh {helpers}/spruce-core.sh set GB "Tetris (World) (Rev 1).zip" armgba
-#spruce all:TRM sh -c "mkdir -p /mnt/SDCARD/RetroArch/.retroarch/config/armGBA && printf 'armgba_link_mode = \"separate\"\n' > /mnt/SDCARD/RetroArch/.retroarch/config/armGBA/armGBA.opt"
+#spruce all:TRM sh {helpers}/armgba-setup.sh separate
+# Joining agreed armGBA's link options from the files as they were then. The
+# guest agrees them again with the test's, and both sessions must hold
+# Separate before either device opens the game: armGBA reads them only then.
+#spruce guest:TRM sh {helpers}/ctl.sh sync
+#spruce all:TRM sh {helpers}/check.sh armgba separate
 host:OPEN_GAME GB "Game Boy (GB)/Tetris (World) (Rev 1).zip"
 WAIT 3000
 guest:OPEN_GAME GB "Game Boy (GB)/Tetris (World) (Rev 1).zip"
 all:WAIT_FOR game 30000
-WAIT 10000
+# The game opened in the agreed mode (and, Together, on this device's own
+# console with the cores agreeing): stop here, not after the race, if not.
+WAIT 4000
+all:TRM sh {helpers}/check.sh armgba separate Tetris
+WAIT 6000
 
 #spruce host:TRM sh {helpers}/keys.sh --bg b:0.3:2 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 start:0.3:0
 #spruce guest:TRM sh {helpers}/keys.sh --bg b:0.3:2 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 sleep:0.6 start:0.3:0
@@ -27,6 +35,8 @@ host:TRM sh {helpers}/keys.sh --bg right:0.2:1.2 a:0.2:0
 guest:TRM sh {helpers}/keys.sh --bg right:0.2:0.4 right:0.2:0.4 a:0.2:0
 WAIT 3000
 host:TRM sh {helpers}/keys.sh start:0.2:3
+WAIT 3000
+all:SCREEN armgba-tetris-sep-play
 
 host:TRM sh {helpers}/gameplay.sh --bg 60 left right left right a b a down
 guest:TRM sh {helpers}/gameplay.sh --bg 60 left right left right a b a down
@@ -38,4 +48,5 @@ guest:TRM sh {helpers}/check.sh link Tetris 40
 
 all:TRM sh {helpers}/quit.sh minarch
 #spruce all:TRM sh {helpers}/spruce-core.sh restore GB
+#spruce all:TRM sh {helpers}/armgba-setup.sh restore
 all:WAIT_FOR devbridge 30000

@@ -1,0 +1,30 @@
+# armGBA Link Mode disagreements, on Tetris (small and quick to open).
+#
+# 1. Arbitration: host file Together, guest file Separate. Agreeing them
+#    (ctl.sh sync) must give Together on both - the host's wins.
+# 2. Detection: the guest's session is then edited to Separate behind the
+#    agreement's back. The guest's shim has to see the host's Together when
+#    the host's options arrive and refuse to play, within seconds.
+
+all:WAIT_FOR devbridge 30000
+#spruce all:TRM sh {helpers}/spruce-core.sh set GB "Tetris (World) (Rev 1).zip" armgba
+#spruce host:TRM sh {helpers}/armgba-setup.sh together
+#spruce guest:TRM sh {helpers}/armgba-setup.sh separate
+#spruce guest:TRM sh {helpers}/ctl.sh sync
+#spruce all:TRM sh {helpers}/check.sh armgba together
+
+#spruce guest:TRM sh -c "sed -i 's/^armgba_link_mode=.*/armgba_link_mode=separate/; s/^option\.armgba_link_mode=.*/option.armgba_link_mode=separate/' /mnt/SDCARD/Saves/netplay/session"
+host:OPEN_GAME GB "Game Boy (GB)/Tetris (World) (Rev 1).zip"
+WAIT 3000
+guest:OPEN_GAME GB "Game Boy (GB)/Tetris (World) (Rev 1).zip"
+all:WAIT_FOR game 30000
+WAIT 15000
+all:SCREEN armgba-mismatch
+guest:TRM sh {helpers}/check.sh armgba-mismatch Tetris
+
+all:TRM sh {helpers}/quit.sh minarch
+#spruce all:TRM sh {helpers}/spruce-core.sh restore GB
+#spruce all:TRM sh {helpers}/armgba-setup.sh restore
+all:WAIT_FOR devbridge 30000
+# Re-agree, so the next test does not inherit the edited session.
+#spruce guest:TRM sh {helpers}/ctl.sh sync

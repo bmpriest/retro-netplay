@@ -10,6 +10,7 @@
 #   ctl.sh pak dsperate|drastic install
 #   ctl.sh set adhoc_switch|compatibility_cores 0|1
 #   ctl.sh set instanced 0|1|2
+#   ctl.sh sync                   guest: agree cores and armGBA link options again
 #   ctl.sh set verbose_logs 0|1   per-game netplay logs, which check.sh judges:
 #                                 set it on both devices before arming a test run
 #

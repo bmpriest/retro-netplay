@@ -1,39 +1,105 @@
-# Mario Kart: Super Circuit - armGBA Together link mode (shared screen:
-# one console, guest pad is player 2). The host starts a single-player
-# Grand Prix race; both pads drive. Judged by check.sh shared.
+# Mario Kart: Super Circuit - armGBA Together, VS race over the Multi-Pak link.
+#
+# Both consoles run on both devices with the inputs shared; each device
+# shows and plays only its own (host player 1, guest player 2), so the
+# screens and menu flow are those of separate consoles. Same flow as
+# mkart.test (paired mGBA) with armGBA's own references (armgba-mk-*): every
+# menu step waits for its screen, so a lost press stops the test instead of
+# ending in two 1-P races.
 
 all:WAIT_FOR devbridge 30000
 #spruce all:TRM sh {helpers}/spruce-core.sh set GBA "Mario Kart - Super Circuit (USA).zip" armgba
-#spruce all:TRM sh -c "mkdir -p /mnt/SDCARD/RetroArch/.retroarch/config/armGBA && printf 'armgba_link_mode = \"together\"\n' > /mnt/SDCARD/RetroArch/.retroarch/config/armGBA/armGBA.opt"
+#spruce all:TRM sh {helpers}/armgba-setup.sh together
+# Joining agreed armGBA's link options from the files as they were then. The
+# guest agrees them again with the test's, and both sessions must hold
+# Together before either device opens the game: armGBA reads them only then.
+#spruce guest:TRM sh {helpers}/ctl.sh sync
+#spruce all:TRM sh {helpers}/check.sh armgba together
 host:OPEN_GAME GBA "Game Boy Advance (GBA)/Mario Kart - Super Circuit (USA).zip"
 WAIT 3000
 guest:OPEN_GAME GBA "Game Boy Advance (GBA)/Mario Kart - Super Circuit (USA).zip"
 all:WAIT_FOR game 30000
-WAIT 8000
-all:SCREEN armgba-mk-tog-title
+# The game opened in the agreed mode (and, Together, on this device's own
+# console with the cores agreeing): stop here, not after the race, if not.
+WAIT 4000
+all:TRM sh {helpers}/check.sh armgba together Mario_Kart
+WAIT 4000
 
-# SINGLE PLAYER (top entry) -> GRAND PRIX.
-host:TRM sh {helpers}/keys.sh --bg a:0.25:0
-WAIT 3000
-host:TRM sh {helpers}/keys.sh --bg a:0.25:0
-WAIT 3000
-# 100cc is the middle entry.
+# Polled (DevBridge ee0079b): over WiFi the lockstep stalls slow the intro
+# and the title settled after the 18 s a fixed check allowed.
+host:VERIFY_WAIT {host_refs}/armgba-mk-title.png 25000
+guest:VERIFY_WAIT {guest_refs}/armgba-mk-title.png 20000
+
+# MULTI-PLAYER, on both.
 host:TRM sh {helpers}/keys.sh --bg down:0.25:0.8 a:0.25:0
-WAIT 3000
-# Mario is the default character.
-host:TRM sh {helpers}/keys.sh --bg a:0.25:0
-WAIT 3000
-host:TRM sh {helpers}/keys.sh --bg a:0.25:0
-WAIT 3000
-# Mushroom Cup, then Peach Circuit.
-host:TRM sh {helpers}/keys.sh a:0.25:2
-WAIT 2000
-host:TRM sh {helpers}/keys.sh a:0.25:3 a:0.25:8
-all:SCREEN armgba-mk-tog-race
+guest:TRM sh {helpers}/keys.sh --bg down:0.25:0.8 a:0.25:0
+WAIT 4000
 
-host:TRM sh {helpers}/gameplay.sh --bg 90 a a a a+left a+right a+left a+right a+r a+l a+up
-guest:TRM sh {helpers}/gameplay.sh --bg 90 a a a a+left a+right a+left a+right a+r a+l a+up
-WAIT 93000
+# MULTI-PAK LINK. No check on the highlighted entry above: it differs from the
+# plain title by less than the animated background does. A lost press shows
+# up here instead, as single-player starting. Linked, the game finds its
+# partner and numbers the players.
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+guest:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 6000
+host:VERIFY_WAIT {host_refs}/armgba-mk-link-host.png 20000 threshold=15
+guest:VERIFY_WAIT {guest_refs}/armgba-mk-link-guest.png 20000 threshold=15
+
+# The link screen shows before the partner is found (P1 alone; within the
+# threshold of the P1+P2 reference) and ignores OK until it is. Checks poll
+# since DevBridge ee0079b and pass as soon as the screen shows, so give the
+# link time to come up before pressing.
+WAIT 4000
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+guest:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 4000
+host:VERIFY_WAIT {host_refs}/armgba-mk-choose-host.png 20000
+guest:VERIFY_WAIT {guest_refs}/armgba-mk-choose-guest.png 20000
+
+# Thresholds: these menus scroll an animated background, so a matching screen
+# scores up to ~9. CHOOSE A GAME and the cc screen sit only 11-14 apart and
+# keep the default 10; the link, character and track screens are 37+ from
+# anything else and get 15.
+# Player 1 picks VS, then 100cc; the guest's console follows over the link.
+host:TRM sh {helpers}/keys.sh down:0.25:1 a:0.25:4
+host:VERIFY_WAIT {host_refs}/armgba-mk-cc-host.png 20000
+guest:VERIFY_WAIT {guest_refs}/armgba-mk-cc-guest.png 20000
+host:TRM sh {helpers}/keys.sh down:0.25:0.8 a:0.25:4
+host:VERIFY_WAIT {host_refs}/armgba-mk-character-host.png 20000 threshold=15
+guest:VERIFY_WAIT {guest_refs}/armgba-mk-character-guest.png 20000 threshold=15
+
+# Host Mario (up-left of the start square), guest Yoshi (right of it).
+host:TRM sh {helpers}/keys.sh --bg up:0.25:0.6 left:0.25:0.6 a:0.25:0
+guest:TRM sh {helpers}/keys.sh --bg right:0.25:0.6 a:0.25:0
+WAIT 3000
+# Confirming a character takes a press from each player, and the paired
+# link can hold one side on CHOOSE A CHARACTER well past a fixed wait
+# (a run sat there for a whole 20 s verify after its single confirm was
+# lost). Confirm together three times, spaced out: A does nothing once
+# a side is confirmed, and a press that lands on the track screen only
+# picks the highlighted Mushroom Cup a moment before the step below.
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+guest:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 3000
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+guest:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 3000
+host:TRM sh {helpers}/keys.sh --bg a:0.25:0
+guest:TRM sh {helpers}/keys.sh --bg a:0.25:0
+WAIT 2000
+host:VERIFY_WAIT {host_refs}/armgba-mk-track-host.png 30000 threshold=15
+# Check the guest's track list before the host confirms anything: under
+# armGBA the host's next presses pick the cup and Peach Circuit and the
+# race starts at once, taking the guest's track screen with it (unlike
+# paired mGBA, where the guest's list only settles after the cup). Never
+# B here: it backs out.
+guest:VERIFY_WAIT {guest_refs}/armgba-mk-track-guest.png 30000 threshold=15
+host:TRM sh {helpers}/keys.sh a:0.25:2
+host:TRM sh {helpers}/keys.sh a:0.25:3 a:0.25:8
+
+host:TRM sh {helpers}/gameplay.sh --bg 120 a a a a+left a+right a+left a+right a+r a+l a+up
+guest:TRM sh {helpers}/gameplay.sh --bg 120 a a a a+left a+right a+left a+right a+r a+l a+up
+WAIT 123000
 all:SCREEN armgba-mk-tog-after
 
 host:TRM sh {helpers}/check.sh shared Mario_Kart 40
@@ -41,4 +107,5 @@ guest:TRM sh {helpers}/check.sh shared Mario_Kart 40
 
 all:TRM sh {helpers}/quit.sh minarch
 #spruce all:TRM sh {helpers}/spruce-core.sh restore GBA
+#spruce all:TRM sh {helpers}/armgba-setup.sh restore
 all:WAIT_FOR devbridge 30000

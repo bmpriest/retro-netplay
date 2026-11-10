@@ -1,15 +1,25 @@
-# Super Mario Bros. Deluxe - armGBA Separate link mode (GBC VS race).
-# Menu flow from mariodx.test without its screenshot checks; judged by
-# check.sh link on the shim logs.
+# Super Mario Bros. Deluxe - armGBA Separate, GBC VS race.
+# One console per device.
+# Both devices drive their own console through VS. Judged by check.sh
+# link; the -vs screens must show YOU/RIVAL mirrored on the two.
 
 all:WAIT_FOR devbridge 30000
 #spruce all:TRM sh {helpers}/spruce-core.sh set GBC "Super Mario Bros. Deluxe (USA, Europe) (Rev 2).zip" armgba
-#spruce all:TRM sh -c "mkdir -p /mnt/SDCARD/RetroArch/.retroarch/config/armGBA && printf 'armgba_link_mode = \"separate\"\n' > /mnt/SDCARD/RetroArch/.retroarch/config/armGBA/armGBA.opt"
+#spruce all:TRM sh {helpers}/armgba-setup.sh separate
+# Joining agreed armGBA's link options from the files as they were then. The
+# guest agrees them again with the test's, and both sessions must hold
+# Separate before either device opens the game: armGBA reads them only then.
+#spruce guest:TRM sh {helpers}/ctl.sh sync
+#spruce all:TRM sh {helpers}/check.sh armgba separate
 host:OPEN_GAME GBC "Game Boy Color (GBC)/Super Mario Bros. Deluxe (USA, Europe) (Rev 2).zip"
 WAIT 3000
 guest:OPEN_GAME GBC "Game Boy Color (GBC)/Super Mario Bros. Deluxe (USA, Europe) (Rev 2).zip"
 all:WAIT_FOR game 30000
-WAIT 15000
+# The game opened in the agreed mode (and, Together, on this device's own
+# console with the cores agreeing): stop here, not after the race, if not.
+WAIT 4000
+all:TRM sh {helpers}/check.sh armgba separate Deluxe
+WAIT 11000
 
 all:TRM sh {helpers}/keys.sh --bg a:0.25:0
 WAIT 1200
@@ -35,4 +45,5 @@ guest:TRM sh {helpers}/check.sh link Deluxe 40
 
 all:TRM sh {helpers}/quit.sh minarch
 #spruce all:TRM sh {helpers}/spruce-core.sh restore GBC
+#spruce all:TRM sh {helpers}/armgba-setup.sh restore
 all:WAIT_FOR devbridge 30000

@@ -12,15 +12,75 @@
 # stale log from an earlier run can never pass for this one. Prints a summary;
 # exits non-zero on anything that means the two devices did not play together.
 
+#
+#   check.sh armgba MODE [ROM_PATTERN]
+#     Before the game opens: the armed session carries an armGBA Link Mode
+#     agreed with the other device, and it is MODE. With ROM_PATTERN, once
+#     the game is open: the shim took that agreed mode, did not find the
+#     host running another (it refuses to play then), and in Together shows
+#     only this device's console. Run early, so a test stops in seconds.
+#   check.sh armgba-mismatch ROM_PATTERN
+#     The guest's shim caught the host running a different Link Mode.
+
 MODE=$1 ROM=$2 MIN_FPS=${3:-0} MAX_WAITS=${4:-}
 MARK=/tmp/netplay-devbridge/started
 
 fail() { echo "FAIL: $*"; exit 1; }
 
-log=$(ls -t $(find /mnt/SDCARD/.userdata/*/logs/netplay-games /mnt/SDCARD/Saves/netplay/logs/netplay-games -name '*.log' -newer "$MARK" 2>/dev/null) 2>/dev/null |
-	grep -F "$ROM" | head -1)
-[ -n "$log" ] || fail "no netplay log for $ROM since this test started (per-game logs need: ctl.sh set verbose_logs 1)"
-echo "log: $log"
+find_log() {
+	log=$(ls -t $(find /mnt/SDCARD/.userdata/*/logs/netplay-games /mnt/SDCARD/Saves/netplay/logs/netplay-games -name '*.log' -newer "$MARK" 2>/dev/null) 2>/dev/null |
+		grep -F "$1" | head -1)
+	[ -n "$log" ] || fail "no netplay log for $1 since this test started (per-game logs need: ctl.sh set verbose_logs 1)"
+	echo "log: $log"
+}
+
+if [ "$MODE" = armgba ]; then
+	WANT=$2 ROM=${3:-}
+	session=
+	for f in /mnt/SDCARD/Saves/netplay/session /mnt/SDCARD/.userdata/shared/Netplay/session; do
+		[ -f "$f" ] && { session=$f; break; }
+	done
+	[ -n "$session" ] || fail "no armed session"
+	grep -q '^armgba_link_agreed=1$' "$session" ||
+		fail "session has no armGBA agreement (run ctl.sh sync on the guest after writing armGBA.opt)"
+	got=$(sed -n 's/^armgba_link_mode=//p' "$session" | tail -1)
+	[ "$got" = "$WANT" ] || fail "session agreed armGBA Link Mode '$got'; this test needs '$WANT'"
+	echo "session: armGBA Link Mode $got, agreed: $(grep '^option\.armgba_' "$session" | sed 's/^option\.armgba_//' | tr '\n' ' ')"
+	[ -n "$ROM" ] || exit 0
+	find_log "$ROM"
+	bad=$(grep 'ARMGBA LINK MODE MISMATCH' "$log" | head -1)
+	[ -z "$bad" ] || fail "$bad"
+	grep -q "armGBA link mode=$WANT .*agreed with the peer" "$log" ||
+		fail "game did not open in the agreed $WANT: $(grep 'armGBA link mode=' "$log" | head -1)"
+	if [ "$WANT" = together ]; then
+		line=$(grep 'armGBA Together: this device shows and plays' "$log" | head -1)
+		[ -n "$line" ] || fail "Together did not lock this device to its own console"
+		echo "${line#*\] }"
+		# Together exchanges state, so the two builds must agree on it; a
+		# refusal here is final, and found in seconds instead of at the end.
+		i=0
+		while :; do
+			bad=$(grep -E 'refusing peer|Peer game or core is incompatible' "$log" | head -1)
+			[ -z "$bad" ] || fail "${bad#*\] }"
+			grep -q 'ROM and core identity match peer' "$log" && break
+			i=$((i + 1))
+			[ $i -lt 20 ] || fail "peers did not compare cores within 20 s"
+			sleep 1
+		done
+		echo "peers agree on ROM and core"
+	fi
+	echo "PASS: armGBA opened in the agreed Link Mode $WANT"
+	exit 0
+fi
+if [ "$MODE" = armgba-mismatch ]; then
+	find_log "$ROM"
+	line=$(grep 'ARMGBA LINK MODE MISMATCH' "$log" | head -1)
+	[ -n "$line" ] || fail "no Link Mode mismatch was caught"
+	echo "PASS: ${line#*\] }"
+	exit 0
+fi
+
+find_log "$ROM"
 
 # Correctness first: any of these means the consoles parted ways.
 # The player-facing startup notice ("Core builds differ. Desyncs may occur")
