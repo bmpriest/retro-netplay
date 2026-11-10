@@ -755,6 +755,7 @@ static void load_option_overrides(const char* session_path) {
 	memset(&info, 0, sizeof(info));
 	core.get_system_info(&info);
 	bool gambatte = info.library_name && contains_ci(info.library_name, "gambatte");
+	bool armgba = info.library_name && contains_ci(info.library_name, "armgba");
 
 	char line[256];
 	while (fgets(line, sizeof(line), f) && option_override_count < MAX_OPTION_OVERRIDES) {
@@ -772,6 +773,7 @@ static void load_option_overrides(const char* session_path) {
 		 * Gambatte fields for GB, but do not apply or log them for every unrelated
 		 * shared-screen core launched under that session. */
 		if (!strncmp(k, "gambatte_", 9) && !gambatte) continue;
+		if (!strncmp(k, "armgba_", 7) && !armgba) continue;
 		if (strlen(k) >= sizeof(option_override[0].key) ||
 		    strlen(v) >= sizeof(option_override[0].value)) {
 			shim_log("ignoring over-long option override '%s'\n", k);
@@ -903,18 +905,17 @@ static int core_is_armgba(void) {
  * every device and expects the frontend to exchange controller inputs
  * (our shared-screen path). "off"/"gamecube" need no input exchange, so
  * they take the link path and simply never link. The user's core option
- * is the source of truth; the launcher may pass it as
- * NETPLAY_ARMGBA_LINK_MODE (read from the frontend's option file, which
- * is settled before the core loads), a session armgba_link_mode= line
- * comes next, and the frontend variable is the last resort. The
- * default is separate: it is the mode that works with no input sync. */
+ * is the source of truth, but both devices must open the game with the same
+ * one, so joining agrees a value from the two devices' option files and
+ * writes it to both sessions (app/netsetup.c, agree_link_options): that
+ * armgba_link_mode= line wins. A session armed by a build without the
+ * agreement falls back to this device's own: the launcher's
+ * NETPLAY_ARMGBA_LINK_MODE (read from the frontend's option file, settled
+ * before the core loads), then the frontend variable. The default is
+ * separate: it is the mode that works with no input sync. */
+static int armgba_mode_agreed;
 static const char* armgba_link_mode(const char* session_path) {
 	static char mode[32];
-	const char* env = getenv("NETPLAY_ARMGBA_LINK_MODE");
-	if (env && *env) {
-		snprintf(mode, sizeof(mode), "%s", env);
-		return mode;
-	}
 	if (session_path) {
 		FILE* f = fopen(session_path, "r");
 		if (f) {
@@ -926,12 +927,18 @@ static const char* armgba_link_mode(const char* session_path) {
 					if (*v) {
 						snprintf(mode, sizeof(mode), "%s", v);
 						fclose(f);
+						armgba_mode_agreed = 1;
 						return mode;
 					}
 				}
 			}
 			fclose(f);
 		}
+	}
+	const char* env = getenv("NETPLAY_ARMGBA_LINK_MODE");
+	if (env && *env) {
+		snprintf(mode, sizeof(mode), "%s", env);
+		return mode;
 	}
 	if (fe_environment) {
 		struct retro_variable var = { "armgba_link_mode", NULL };
@@ -941,6 +948,25 @@ static const char* armgba_link_mode(const char* session_path) {
 		}
 	}
 	return "separate";
+}
+
+/* armGBA Together runs every console on every device; the client index
+ * (GET_NETPLAY_CLIENT_INDEX: host 0, guest 1) tells it which is this
+ * device's. Show only that console, and keep it that way: R2 and L2 change
+ * the layout mid-game, so they never leave this device (GBA and Game Boy
+ * have no such buttons), and the controller-switch combo is off on both.
+ * Screens are this device's own business - nothing here is host-decided -
+ * but the switch combo moves inputs between consoles, so both run it off. */
+static int armgba_session;
+static int armgba_together;
+static void armgba_together_local_view(void) {
+	armgba_together = 1;
+	const char* screen = NetLink_getRole() == NETLINK_ROLE_CLIENT ? "player 2" : "player 1";
+	set_option_override("armgba_link_screens", screen);
+	set_option_override("armgba_r2_follows", "auto");
+	set_option_override("armgba_switch_controller", "off");
+	shim_log("armGBA Together: this device shows and plays %s only; L2/R2 layout "
+	         "changes and controller switching are off\n", screen);
 }
 
 /*
@@ -1344,11 +1370,14 @@ static void ensure_loaded(void) {
 		// reach the same answer without having to negotiate it.
 		int override = session_mode_override(session);
 		netplay_mode = (override >= 0) ? override : !core_wants_link();
-		if (override < 0 && core_is_armgba()) {
+		if (core_is_armgba()) armgba_session = 1;
+		if (override < 0 && armgba_session) {
 			const char* lm = armgba_link_mode(session);
 			netplay_mode = !strcmp(lm, "together") ? 1 : 0;
-			shim_log("armGBA link mode=%s -> %s\n", lm,
-			         netplay_mode ? "shared-screen (Together)" : "link-cable (Separate)");
+			shim_log("armGBA link mode=%s -> %s (%s)\n", lm,
+			         netplay_mode ? "shared-screen (Together)" : "link-cable (Separate)",
+			         armgba_mode_agreed ? "agreed with the peer at join"
+			                            : "this device's own setting; not agreed at join");
 		}
 		ra_read_session(session);
 		if (ra_mode) {
@@ -1360,6 +1389,7 @@ static void ensure_loaded(void) {
 			ra_apply_peer_options();
 		} else {
 			force_builtin_firmware();
+			if (armgba_session && netplay_mode) armgba_together_local_view();
 		}
 
 		struct retro_system_info info;
@@ -2029,6 +2059,36 @@ static void scrub_core_state(uint8_t* state, size_t size) {
 /* Package the core state together with the raw persistent-memory regions. The
  * files that minarch used to populate those regions (.sav, .srm, compressed or
  * otherwise) never enter the protocol. */
+/* The core always gets a 16-byte-aligned state buffer. armGBA's 32-bit build
+ * zeroes 64-bit fields of its state with alignment-hinted NEON stores
+ * (vst1.64 [rN:64]); handed the state right after our 20-byte header, which
+ * malloc leaves 4 bytes off, it took SIGBUS on the A30 - an ARMv7 kernel fixes
+ * up misaligned integer accesses but not NEON/VFP ones. A frontend's own
+ * save-state buffers are aligned, which is why only Netplay hit it. Measured
+ * on the A30 with Mario Kart: any base that is not 8-aligned faults, in every
+ * link mode. An aligned destination costs nothing; anything else goes through
+ * an aligned copy. */
+static bool core_serialize_aligned(Core* target, void* dst, size_t n) {
+	if (!((uintptr_t)dst & 15)) return target->serialize(dst, n);
+	void* tmp = NULL;
+	if (posix_memalign(&tmp, 16, n)) return false;
+	memset(tmp, 0, n);
+	bool ok = target->serialize(tmp, n);
+	if (ok) memcpy(dst, tmp, n);
+	free(tmp);
+	return ok;
+}
+
+static bool core_unserialize_aligned(Core* target, const void* src, size_t n) {
+	if (!((uintptr_t)src & 15)) return target->unserialize(src, n);
+	void* tmp = NULL;
+	if (posix_memalign(&tmp, 16, n)) return false;
+	memcpy(tmp, src, n);
+	bool ok = target->unserialize(tmp, n);
+	free(tmp);
+	return ok;
+}
+
 static bool capture_core_state(Core* target, void** out, size_t* out_len, uint32_t* out_hash) {
 	size_t state_size = target->serialize_size();
 	uint32_t sram_size, rtc_size;
@@ -2055,7 +2115,7 @@ static bool capture_core_state(Core* target, void** out, size_t* out_len, uint32
 	memcpy(buf, &wire, sizeof(wire));
 	uint8_t* state = buf + sizeof(wire);
 	memset(state, 0, state_size);
-	if (!target->serialize(state, state_size)) { free(buf); return false; }
+	if (!core_serialize_aligned(target, state, state_size)) { free(buf); return false; }
 	scrub_core_state(state, state_size);
 	if (sram_size) memcpy(state + state_size, sram, sram_size);
 	if (rtc_size) memcpy(state + state_size + sram_size, rtc, rtc_size);
@@ -2087,7 +2147,7 @@ static bool apply_core_state(Core* target, const void* data, size_t len) {
 	}
 
 	const uint8_t* state = (const uint8_t*)data + sizeof(AuthoritativeHeader);
-	if (!target->unserialize(state, h.state_size)) {
+	if (!core_unserialize_aligned(target, state, h.state_size)) {
 		shim_log("state rejected: core unserialize failed (%u bytes)\n", h.state_size);
 		return false;
 	}
@@ -2244,6 +2304,7 @@ static void offer_state_basis(void) {
  * would part the two devices for good (see guest_options_before_load). A guest
  * waits for them before loading its own game. */
 static int host_options_published;
+static char armgba_mismatch[128];
 
 static const char* current_option_value(const char* key) {
 	const char* v = find_option_override(key);
@@ -2312,6 +2373,17 @@ static int guest_options_service(void) {
 		}
 		if (set_option_override(key, value)) applied++;
 		else shim_log("WARNING: no room for host option %s - session may desync\n", key);
+		/* Link Mode also picked this side's path when the core loaded, which
+		 * the host's value cannot change now. Joining agrees it, so this only
+		 * catches a session armed without that (or edited since). */
+		if (armgba_session && !strcmp(key, "armgba_link_mode") &&
+		    (!strcmp(value, "together") ? 1 : 0) != netplay_mode && !armgba_mismatch[0]) {
+			snprintf(armgba_mismatch, sizeof(armgba_mismatch),
+			         "Link Mode differs: host %s, this device %s. Exit and join again.",
+			         value, netplay_mode ? "together" : "separate");
+			shim_log("ARMGBA LINK MODE MISMATCH: host runs %s, this device %s - refusing to play\n",
+			         value, netplay_mode ? "together" : "separate");
+		}
 	}
 	shim_log("running the host's %d core options, %d changed or not known before\n", applied, changed);
 	return changed;
@@ -4492,7 +4564,7 @@ static bool ra_load(const void* data, size_t len) {
 		shim_log("RetroArch state is %zu bytes, this core serializes %zu: the builds differ\n",
 		         len, ours);
 	ra_special_state = 1;
-	bool ok = core.unserialize(data, len);
+	bool ok = core_unserialize_aligned(&core, data, len);
 	ra_special_state = 0;
 	return ok;
 }
@@ -5005,9 +5077,18 @@ void retro_run(void) {
 	if (session_active && !solo_mode) pace_session_frames();
 
 	/* Late only: a guest normally has them before it loads the game. */
-	if (session_active && !ra_mode && !solo_mode && (netplay_mode || dual_link_mode)) {
+	if (session_active && !ra_mode && !solo_mode && (netplay_mode || dual_link_mode || armgba_session)) {
 		if (guest_options_service() > 0 && netplay_mode && !dual_link_mode)
 			options_resync_pending = 1;
+	}
+	if (armgba_mismatch[0]) {
+		/* Nothing this session can do: the two consoles were set up for
+		 * different link modes when the games opened. */
+		if (fe_input_poll) fe_input_poll();
+		static unsigned mismatch_frames;
+		present_paused_frame(mismatch_frames++, armgba_mismatch);
+		present_paused_audio();
+		return;
 	}
 
 	// Netpacket state and inbound packets are settled before the core runs, so
@@ -5067,6 +5148,8 @@ void retro_run(void) {
 			uint32_t local = fe_input_state
 				? (uint32_t)fe_input_state(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK)
 				: 0;
+			if (armgba_together)
+				local &= ~((1u << RETRO_DEVICE_ID_JOYPAD_L2) | (1u << RETRO_DEVICE_ID_JOYPAD_R2));
 			local_inputs[target % 256] = local;
 			NetLink_sendInput(target, local);
 			last_scheduled = target;
@@ -5343,7 +5426,10 @@ bool retro_load_game(const struct retro_game_info* game) {
 			shim_log("could not retain the local cartridge; linked cartridges "
 			         "will fall back to network serial\n");
 	}
-	bool host_decides = session_active && !ra_mode && (netplay_mode || dual_link_mode);
+	/* armGBA too in Separate: its link options apply when the game opens, so
+	 * the guest needs the host's before it loads (and checks Link Mode). */
+	bool host_decides = session_active && !ra_mode &&
+	                    (netplay_mode || dual_link_mode || armgba_session);
 	if (host_decides && NetLink_getRole() == NETLINK_ROLE_CLIENT) guest_options_before_load();
 	bool loaded = core.load_game(game);
 	if (loaded && host_decides) host_options_publish();
