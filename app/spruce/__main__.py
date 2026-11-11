@@ -1,4 +1,9 @@
-"""Netplay's spruce front end. All session work stays in netplay.elf."""
+"""Netplay's spruce front end. All session work stays in netplay.elf.
+
+Two ways in: launch.sh runs it as its own process (python -m spruce_ui), which
+brings PyUI up itself; and spruce's PyUI runs it inside its own process from
+the Apps menu ("pyuiEntry" in config.json -> pyui.run -> run_in_pyui), where
+PyUI is already up and everything put into it is taken out again on exit."""
 
 from __future__ import annotations
 
@@ -12,8 +17,10 @@ from pathlib import Path
 
 CARD = Path(os.environ.get("SDCARD_PATH", "/mnt/SDCARD"))
 PAK = Path(os.environ.get("NETPLAY_PAK", CARD / "App/Netplay"))
-PLATFORM = os.environ["PLATFORM"]
+PLATFORM = os.environ.get("PLATFORM", "")
 ENGINE = PAK / "bin" / PLATFORM / "netplay.elf"
+# In PyUI's process: netplay.elf's environment, as launch.sh --env prints it.
+ENGINE_ENV: dict[str, str] | None = None
 STATE = Path(os.environ.get("NETPLAY_STATE", CARD / "Saves/netplay"))
 HINT = "B BACK    A SELECT"
 FOOTER_CONTEXT = None
@@ -25,6 +32,8 @@ PROMPTING = False
 
 def control(*args: str) -> str:
     env = os.environ.copy()
+    if ENGINE_ENV is not None:
+        env.update(ENGINE_ENV)
     if engine_libraries := env.get("NETPLAY_ENGINE_LD_LIBRARY_PATH"):
         env["LD_LIBRARY_PATH"] = engine_libraries
     result = subprocess.run(
@@ -92,12 +101,24 @@ def bootstrap() -> None:
     Display.present()
     Controller.init()
 
+
+_BAR_SAVED: tuple[bool, object] | None = None
+
+
+def enter() -> None:
+    """Put Netplay into an initialised PyUI: scratch space for generated
+    glyphs, and our footer in place of PyUI's bottom bar. leave() undoes it."""
+    global GLYPH_SCRATCH, _BAR_SAVED
+    from display.display import Display
     from . import generated
     import tempfile
-    global GLYPH_SCRATCH
     GLYPH_SCRATCH = tempfile.TemporaryDirectory(prefix="netplay-ui-")
     generated.use_scratch(Path(GLYPH_SCRATCH.name))
-    original = Display.bottom_bar.render_bottom_bar
+    bar = Display.bottom_bar
+    # Our override is an instance attribute over PyUI's method; remember
+    # whether one was there before, so leave() restores exactly that.
+    _BAR_SAVED = ("render_bottom_bar" in vars(bar), vars(bar).get("render_bottom_bar"))
+    original = bar.render_bottom_bar
 
     def bottom_bar(bottom_bar_text=None, render_bottom_bar_icons_and_images=True, **more):
         from . import footer
@@ -111,7 +132,27 @@ def bootstrap() -> None:
         footer.render(left, session_active() and HINT != "PLEASE WAIT" and not PROMPTING,
                       HINT if not left else "")
 
-    Display.bottom_bar.render_bottom_bar = bottom_bar
+    bar.render_bottom_bar = bottom_bar
+
+
+def leave() -> None:
+    """Take Netplay out of PyUI again: PyUI drops our modules after an
+    in-process app returns, so nothing of ours may stay running or hooked."""
+    global GLYPH_SCRATCH, _BAR_SAVED, FOOTER_CONTEXT
+    from display.display import Display
+    CORE_READY.wait(timeout=20)   # the core check is the one worker thread
+    bar = Display.bottom_bar
+    if _BAR_SAVED is not None:
+        had, previous = _BAR_SAVED
+        if had:
+            bar.render_bottom_bar = previous
+        elif "render_bottom_bar" in vars(bar):
+            del bar.render_bottom_bar
+        _BAR_SAVED = None
+    FOOTER_CONTEXT = None
+    if GLYPH_SCRATCH is not None:
+        GLYPH_SCRATCH.cleanup()
+        GLYPH_SCRATCH = None
 
 
 class SessionEnded(Exception):
@@ -648,12 +689,54 @@ def main() -> int:
             return answer.wait()
     try:
         bootstrap()
+        enter()
         warm_cores()
         run()
         return 0
     except Exception:
         logging.exception("PyUI front end failed")
         return 1
+
+
+def engine_environment() -> dict[str, str]:
+    """netplay.elf's environment for this device, from launch.sh --env: the
+    same code that sets it up when launch.sh opens the app itself."""
+    out = subprocess.run(["sh", str(PAK / "launch.sh"), "--env"], capture_output=True,
+                         text=True, check=False, cwd=str(PAK))
+    if out.returncode:
+        raise RuntimeError("Netplay has no build for this device")
+    return dict(line.split("=", 1) for line in out.stdout.splitlines() if "=" in line)
+
+
+def run_in_pyui() -> None:
+    """The Apps menu entry inside PyUI's own process (see pyui.py)."""
+    global ENGINE_ENV, PLATFORM, ENGINE, STATE
+    log = logging.getLogger("netplay")
+    handler = None
+    try:
+        ENGINE_ENV = engine_environment()
+        PLATFORM = ENGINE_ENV.get("PLATFORM", PLATFORM)
+        ENGINE = PAK / "bin" / PLATFORM / "netplay.elf"
+        STATE = Path(ENGINE_ENV.get("NETPLAY_STATE", str(STATE)))
+        STATE.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(str(STATE / "pyui.log"))
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        log.addHandler(handler)
+        log.setLevel(logging.INFO)
+        log.info("opening inside PyUI on %s", PLATFORM)
+        enter()
+        try:
+            warm_cores()
+            run()
+        finally:
+            leave()
+    except Exception:
+        log.exception("Netplay inside PyUI failed")
+        raise   # PyUI logs it too and says the app stopped after an error
+    finally:
+        if handler is not None:
+            log.removeHandler(handler)
+            handler.close()
 
 
 if __name__ == "__main__":

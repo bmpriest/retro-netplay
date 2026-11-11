@@ -11,6 +11,9 @@ SPRUCE_PLATFORM="$PLATFORM"
 
 if ! PLATFORM="$(np_spruce_platform "$SPRUCE_PLATFORM")" ||
    [ ! -x "$DIR/bin/$PLATFORM/netplay.elf" ]; then
+	# --env is asked from inside PyUI, which reports the failure itself: a
+	# message here would start a second PyUI.
+	[ "$1" = --env ] && exit 1
 	/mnt/SDCARD/App/PyUI/launch.sh -msgDisplay "Netplay has no build for this device ($SPRUCE_PLATFORM) yet." -msgDisplayTimeMs 5000
 	exit 0
 fi
@@ -25,6 +28,7 @@ HOME="$USERDATA_PATH"
 export SYSTEM_PATH USERDATA_PATH SHARED_USERDATA_PATH HOME
 PYUI_BASE_LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}
 LD_LIBRARY_PATH=$(np_spruce_engine_libraries) || {
+	[ "$1" = --env ] && exit 1
 	/mnt/SDCARD/App/PyUI/launch.sh -msgDisplay "Netplay needs Spruce's SDL2 runtime in App/PyUI/dll." -msgDisplayTimeMs 5000
 	exit 1
 }
@@ -42,6 +46,12 @@ LOG="$NETPLAY_LOGS/netplay.txt"
 # The native binary remains the control plane and still serves headless
 # calls. The Apps entry and game invitations use spruce's own PyUI.
 case "$1" in
+	--env)
+		# For the front end running inside spruce's PyUI (spruce_ui/pyui.py):
+		# netplay.elf's environment, as set up above, one VAR=value per line.
+		env | grep -E '^(PLATFORM|SPRUCE_PLATFORM|SDCARD_PATH|SYSTEM_PATH|USERDATA_PATH|SHARED_USERDATA_PATH|HOME|LD_LIBRARY_PATH|NETPLAY_[A-Z_]*)='
+		exit 0
+		;;
 	--invite) ;;
 	--*) exec "$DIR/bin/$PLATFORM/netplay.elf" "$@" >> "$LOG" 2>&1 ;;
 esac
