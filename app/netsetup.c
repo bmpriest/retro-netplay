@@ -565,6 +565,17 @@ static bool platform_is_32bit(void) {
 	return !strcmp(ns_platform, "my282") || !strcmp(ns_platform, "my285");
 }
 
+/* The platform whose shim and override cores this device runs. The Mini
+ * Flip (my285) ships only its own app binaries and runs the A30's (my282)
+ * armv7 shim and paired cores, as the game launcher does
+ * (launcher/spruce/retroarch.sh sets NETPLAY_SHIM_PLATFORM). */
+static const char* shared_platform(void) {
+#ifdef NETPLAY_SPRUCE
+	if (!strcmp(ns_platform, "my285")) return "my282";
+#endif
+	return ns_platform;
+}
+
 static const char* compatibility_arch(void) {
 	return platform_is_32bit() ? "armv7" : "aarch64";
 }
@@ -1526,14 +1537,14 @@ static bool write_compat_file(const char* path,
 bool NS_gambatteDualAvailable(void) {
 	char path[512];
 	snprintf(path, sizeof(path), "%s/cores/override/%s/gambatte_dual_libretro.so",
-	         ns_pak, ns_platform);
+	         ns_pak, shared_platform());
 	return file_exists(path);
 }
 
 bool NS_mgbaDualAvailable(void) {
 	char path[512];
 	snprintf(path, sizeof(path), "%s/cores/override/%s/mgba_dual_libretro.so",
-	         ns_pak, ns_platform);
+	         ns_pak, shared_platform());
 	return file_exists(path);
 }
 
@@ -1541,11 +1552,11 @@ static uint32_t instanced_available_mask(void) {
 	char path[512];
 	uint32_t mask = 0;
 	snprintf(path, sizeof(path), "%s/cores/override/%s/gambatte_dual_libretro.so",
-	         ns_pak, ns_platform);
+	         ns_pak, shared_platform());
 	if (instanced_core_enabled("gambatte") && file_exists(path))
 		mask |= INST_CAP_GAMBATTE;
 	snprintf(path, sizeof(path), "%s/cores/override/%s/mgba_dual_libretro.so",
-	         ns_pak, ns_platform);
+	         ns_pak, shared_platform());
 	if (instanced_core_enabled("mgba") && file_exists(path))
 		mask |= INST_CAP_MGBA;
 	return mask;
@@ -1928,10 +1939,10 @@ int NS_runChecks(NS_Check* out, int max, NS_CheckResult* worst) {
 	/* 4. Our own pieces are present for this platform. */
 	{
 		char shim[512];
-		snprintf(shim, sizeof(shim), "%s/bin/%s/netplay_shim.so", ns_pak, ns_platform);
+		snprintf(shim, sizeof(shim), "%s/bin/%s/netplay_shim.so", ns_pak, shared_platform());
 		bool ok = file_exists(shim);
 		add(out, &n, max, ok ? NS_CHECK_OK : NS_CHECK_FAIL, "Shim for this device",
-		    ok ? ns_platform : "missing - unsupported platform");
+		    ok ? shared_platform() : "missing - unsupported platform");
 	}
 
 	/* 5. This device can tell whether it is associated, and can get an address.
