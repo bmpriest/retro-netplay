@@ -26,7 +26,6 @@ USERDATA_PATH="$DIR/nextui/.userdata/$PLATFORM"
 SHARED_USERDATA_PATH="$DIR/nextui/.userdata/shared"
 HOME="$USERDATA_PATH"
 export SYSTEM_PATH USERDATA_PATH SHARED_USERDATA_PATH HOME
-/mnt/SDCARD/spruce/scripts/asound-setup.sh "$HOME"
 PYUI_BASE_LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}
 LD_LIBRARY_PATH=$(np_spruce_engine_libraries) || {
 	[ "$1" = --env ] && exit 1
@@ -57,6 +56,12 @@ case "$1" in
 	--*) exec "$DIR/bin/$PLATFORM/netplay.elf" "$@" >> "$LOG" 2>&1 ;;
 esac
 
+# spruce's ALSA config in Netplay's HOME, as every spruce launcher that moves
+# HOME writes it: on dArkMoss the volume (a softvol) and the Bluetooth route
+# exist only there. Only before Netplay's own screen (the app, an invitation);
+# the headless calls above play nothing and come often.
+[ -x /mnt/SDCARD/spruce/scripts/asound-setup.sh ] &&
+	/mnt/SDCARD/spruce/scripts/asound-setup.sh "$HOME" >> "$LOG" 2>&1
 LD_LIBRARY_PATH=$PYUI_BASE_LD_LIBRARY_PATH
 RUN_DIR=$DIR
 PYTHON=$(get_python_path)

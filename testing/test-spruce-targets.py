@@ -50,6 +50,8 @@ class SpruceTargets(unittest.TestCase):
             for library in ('libSDL2-2.0', 'libSDL2_image-2.0', 'libSDL2_ttf-2.0'):
                 write(f'App/PyUI/dll/{library}.so', 'fake SDL runtime')
             write('spruce/scripts/asound-setup.sh', '#!/bin/sh\nprintf "%s\\n" "$1" > "$TEST_ASOUND"\n', True)
+            # The A30's PyUI runs on spruce's 32-bit python.
+            write('spruce/bin/python/bin/MainUI', '#!/bin/sh\nprintf "%s\\n" "$PLATFORM" "$NETPLAY_PYUI_DEVICE" "$PYSDL2_DLL_PATH" "${SDL_VIDEODRIVER:-}" "${SDL_AUDIODRIVER:-}" "$NETPLAY_ENGINE_LD_LIBRARY_PATH" "$*" > "$TEST_RESULT"\n', True)
             write('spruce/flip/bin/MainUI', '#!/bin/sh\nprintf "%s\\n" "$PLATFORM" "$NETPLAY_PYUI_DEVICE" "$PYSDL2_DLL_PATH" "${SDL_VIDEODRIVER:-}" "${SDL_AUDIODRIVER:-}" "$NETPLAY_ENGINE_LD_LIBRARY_PATH" "$*" > "$TEST_RESULT"\n', True)
             for build in ('tg5040', 'tg5050', 'my355', 'h700', 'my282'):
                 write(f'App/Netplay/bin/{build}/netplay.elf', '#!/bin/sh\nexit 0\n', True)
@@ -91,6 +93,38 @@ class SpruceTargets(unittest.TestCase):
             result = subprocess.run(['sh', '-c', script, 'test',
                                      str(ROOT/'launcher/spruce/firmware.sh'), model], capture_output=True)
             self.assertNotEqual(result.returncode, 0, model)
+
+    def test_darkmoss_is_found_without_the_family_variable(self):
+        # spruce does not export PLATFORM_FAMILY on dArkMoss: a process it
+        # starts (nds-shadow.sh) only has PLATFORM, and reads os-release.
+        with tempfile.TemporaryDirectory() as directory:
+            release = Path(directory)/'os-release'
+            env = {k: v for k, v in os.environ.items() if k != 'PLATFORM_FAMILY'}
+            for text, want in (('OS_NAME="DARKMOSS"\n', b'my355\n'), ('OS_NAME="other"\n', b'')):
+                release.write_text(text)
+                result = subprocess.run(['sh', '-c', '. "$1"; np_spruce_platform A10MiniV4', 'test',
+                                         str(ROOT/'launcher/spruce/firmware.sh')],
+                                        env={**env, 'NETPLAY_OS_RELEASE': str(release)}, capture_output=True)
+                self.assertEqual(result.stdout, want, text)
+
+    def test_headless_calls_leave_the_alsa_config_alone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            card = Path(directory)
+            app = card/'App/Netplay'
+            def write(relative, text, executable=False):
+                path = card/relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text)
+                if executable: path.chmod(0o755)
+            write('App/Netplay/launcher/firmware.sh', (ROOT/'launcher/spruce/firmware.sh').read_text())
+            write('App/Netplay/launch.sh', (ROOT/'launcher/spruce/launch.sh').read_text().replace('/mnt/SDCARD', str(card)))
+            write('spruce/scripts/helperFunctions.sh', 'PLATFORM=Brick\nget_python_path() { echo /bin/false; }\n')
+            write('spruce/scripts/asound-setup.sh', '#!/bin/sh\ntouch "$TEST_ASOUND"\n', True)
+            write('App/Netplay/bin/tg5040/netplay.elf', '#!/bin/sh\nexit 0\n', True)
+            env = {**os.environ, 'SDCARD_PATH': str(card), 'TEST_ASOUND': str(card/'asound')}
+            subprocess.run(['sh', str(app/'launch.sh'), '--ctl', 'status'], env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertFalse((card/'asound').exists())
 
     def test_every_darkmoss_unit_uses_the_my355_build(self):
         script = 'PLATFORM_FAMILY=darkmoss; . "$1"; np_spruce_platform "$2"'

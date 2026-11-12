@@ -25,7 +25,13 @@ np_spruce_platform() {
 		A30|MIYOO_A30)           echo my282 ;;
 		MiyooMini)               echo my285 ;;
 		*)
-			[ "${PLATFORM_FAMILY:-}" = darkmoss ] || return 1
+			# Every dArkMoss unit runs the my355 build (plain AArch64, RK3566
+			# and RK3326 alike). helperFunctions.sh sets PLATFORM_FAMILY
+			# without exporting it, so a process spruce starts (the DS
+			# shadow) looks at the image the way helperFunctions.sh does.
+			[ "${PLATFORM_FAMILY:-}" = darkmoss ] ||
+				grep -q '^OS_NAME="DARKMOSS"' "${NETPLAY_OS_RELEASE:-/etc/os-release}" 2>/dev/null ||
+				return 1
 			echo my355
 			;;
 	esac
