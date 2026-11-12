@@ -1,4 +1,4 @@
-.PHONY: corecmp app-spruce dist-spruce udhcpd check-udhcpd cores-dsp check-dsp cores-nds check-nds drastic-radio dist dist-base dist-compatibility dist-full shim cores core-sources compatibility compatibility-sources compatibility-armv7 compatibility-aarch64 compatibility-spruce32 compatibility-spruce32-sources check-compatibility check-netplay-cores cores-gambatte cores-gambatte-dual cores-gpsp cores-mgba cores-mgba-dual mgba-pak gblc-pak app test test-gambatte-dual clean help nds-pak nds-wifi-hooks nds-wifi-paks nds-wifi-a30-pak varnish check-varnish
+.PHONY: corecmp cores-dsp-spruce app-spruce dist-spruce udhcpd check-udhcpd cores-dsp check-dsp cores-nds check-nds drastic-radio dist dist-base dist-compatibility dist-full shim cores core-sources compatibility compatibility-sources compatibility-armv7 compatibility-aarch64 compatibility-spruce32 compatibility-spruce32-sources check-compatibility check-netplay-cores cores-gambatte cores-gambatte-dual cores-gpsp cores-mgba cores-mgba-dual mgba-pak gblc-pak app test test-gambatte-dual clean help nds-pak nds-wifi-hooks nds-wifi-paks nds-wifi-a30-pak varnish check-varnish
 .PHONY: dist-complete
 
 PAK        := Netplay.pak
@@ -529,6 +529,39 @@ cores-dsp:
 		printf "   %-7s %s\n" "$$p" "$$(du -sh $(DSP_STAGE)/$$p/DSP.pak | cut -f1)"; \
 	done
 
+# DSperate for spruce: upstream's own SDL frontend, as spruce ships it, plus
+# the Netplay LAN/Wi-Fi fixes, from the netplay-patches branch of
+# bmpriest/DSperate (DSPERATE_SPRUCE_REF pins it). One AArch64 build serves
+# every 64-bit spruce device; nds-shadow.sh runs it in place of spruce's in
+# Netplay sessions, so both ends play the same build. The tg5040 image's
+# glibc 2.28 sysroot is the oldest of them.
+DSPERATE_SPRUCE_REPO ?= $(HOME)/dev/sbcs/cores/DSperate
+DSPERATE_SPRUCE_REF  := 338097c8
+DSPERATE_SPRUCE_DIR  := build/dsperate-spruce
+DSPERATE_SPRUCE_BIN  := dist/dsperate-spruce/aarch64/dsperate
+cores-dsp-spruce:
+	@rm -rf "$(DSPERATE_SPRUCE_DIR)" && mkdir -p "$(DSPERATE_SPRUCE_DIR)/src" "$(DSPERATE_SPRUCE_DIR)/scripts"
+	@git -C "$(DSPERATE_SPRUCE_REPO)" archive "$(DSPERATE_SPRUCE_REF)" | tar -x -C "$(DSPERATE_SPRUCE_DIR)/src"
+	@cp cores/dsperate/scripts/docker-env.sh "$(DSPERATE_SPRUCE_DIR)/scripts/"
+	@cd "$(DSPERATE_SPRUCE_DIR)/src" && git apply ../../../cores/dsperate/patches/0002-gcc8-neon-scale-row-grid-miscompile.patch
+	@docker run --rm -v "$(abspath $(DSPERATE_SPRUCE_DIR))":/build \
+		ghcr.io/loveretro/tg5040-toolchain@sha256:f131c6af64029a8723d0ce8d3c2682642f5f091b04714f6beedda9bec18477ab \
+		/build/scripts/docker-env.sh bash -c 'set -euo pipefail; \
+		cmake -S /build/src -B /build/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+		  -DDSPERATE_JIT=ON -DDSPERATE_NEON=ON -DDSPERATE_SDL=ON -DDSPERATE_WAYLAND=OFF \
+		  -DDSPERATE_HEADLESS=OFF -DDSPERATE_TESTS=OFF -DDSPERATE_CHEEVOS=ON -DDSPERATE_NET=ON \
+		  -DDSPERATE_VULKAN=OFF -DDSPERATE_PGO=OFF -DCMAKE_TOOLCHAIN_FILE="$$CMAKE_TOOLCHAIN_FILE" \
+		  -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=/build/build/out \
+		  -DCMAKE_C_FLAGS="-I$$CROSS_ROOT/include/ -mcpu=cortex-a53 -mtune=cortex-a53 -pthread" \
+		  -DCMAKE_CXX_FLAGS="-I$$CROSS_ROOT/include/ -mcpu=cortex-a53 -mtune=cortex-a53 -pthread" \
+		  -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc $$DSP_SDL_LDFLAGS" \
+		  -DCMAKE_CXX_STANDARD_LIBRARIES="-Wl,--push-state,--no-as-needed -lpthread -Wl,--pop-state" && \
+		cmake --build /build/build --target dsperate -- -j$$(nproc) && \
+		aarch64-nextui-linux-gnu-strip -o /build/build/out/dsperate.stripped /build/build/out/dsperate'
+	@mkdir -p "$(dir $(DSPERATE_SPRUCE_BIN))" && cp "$(DSPERATE_SPRUCE_DIR)/build/out/dsperate.stripped" "$(DSPERATE_SPRUCE_BIN)"
+	@printf '%s\n' "$(DSPERATE_SPRUCE_REF)" > "$(dir $(DSPERATE_SPRUCE_BIN))/SOURCE_COMMIT"
+	@ls -la "$(DSPERATE_SPRUCE_BIN)"
+
 check-dsp:
 	@for p in $(DSP_PLATFORMS); do \
 		test -x "$(DSP_STAGE)/$$p/DSP.pak/$$p/dsperate" || { echo "missing DSP.pak $$p - run 'make cores-dsp' first"; exit 1; }; \
@@ -700,6 +733,9 @@ dist-spruce: $(foreach p,$(SPRUCE_PLATFORMS),check-shim-$(if $(filter my285,$(p)
 		mkdir -p "$$D/cores/compatibility" && \
 		cp -R dist/compatibility/aarch64 "$$D/cores/compatibility/" && \
 		cp cores/compatibility-platforms.txt "$$D/cores/compatibility/PLATFORMS.txt"; \
+	fi && \
+	if [ -f "$(DSPERATE_SPRUCE_BIN)" ]; then \
+		mkdir -p "$$D/cores/dsperate" && cp -R "$(dir $(DSPERATE_SPRUCE_BIN))" "$$D/cores/dsperate/"; \
 	fi && \
 	if [ -d dist/compatibility-spruce32/armv7 ]; then \
 		mkdir -p "$$D/cores/compatibility" && \

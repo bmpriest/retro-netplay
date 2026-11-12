@@ -62,6 +62,15 @@ if [ "$bin" = drastic ] || [ "$bin" = drastic64 ]; then
 	real=/tmp/netplay/nds/drastic
 	LD_PRELOAD="$radio${LD_PRELOAD:+:$LD_PRELOAD}" np_nds_run "$real" "$@"
 fi
+# Netplay's own DSperate (cores/dsperate/aarch64, built by make
+# cores-dsp-spruce): the same build on both devices, with the LAN fixes
+# spruce's copy may lack. Only in a session, and only where it runs; a stock
+# launch never gets here. spruce's launcher already set the SDL library path
+# its own DSperate uses, which this build loads too.
+own_dsperate=$NP/cores/dsperate/aarch64/dsperate
+if [ -x "$own_dsperate" ] && [ "$(uname -m)" = aarch64 ]; then
+	real=$own_dsperate
+fi
 if [ "$role" = host ]; then set -- "$@" --lan-host Netplay; else set -- "$@" --lan-join "$peer"; fi
 DS_LAN_TIMEOUT_MS=100
 grep -q '^adhoc_ssid=' "$NETPLAY_SESSION" && DS_LAN_TIMEOUT_MS=50
