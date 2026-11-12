@@ -33,10 +33,27 @@ set)
 		printf '%s\n' "$ROM" > "$SAVED/rom"
 		[ -f "$CACHE" ] && cp "$CACHE" "$SAVED/cache"
 	fi
-	"$JQ" --arg game "$ROM" --arg core "$CORE" '.menuOptions.Emulator.overrides[$game] = $core' \
+	# The key spruce reads this device's per-game core from, found the way its
+	# get_core_override finds it: the platform's own key (Emulator_MiyooMini on
+	# the Miyoo Mini family, whose choices live apart), else the key whose
+	# "devices" list names this device, else plain Emulator.
+	KEY=$(
+		. /mnt/SDCARD/spruce/scripts/helperFunctions.sh
+		. /mnt/SDCARD/spruce/scripts/emu/lib/general_functions.sh
+		EMU_NAME=$EMU EMU_JSON_PATH=$CFG GAME=$ROM
+		RA_BUILD=$(get_effective_ra_build)
+		for n in $(platform_names); do
+			"$JQ" -e ".menuOptions.Emulator_$n" "$CFG" >/dev/null 2>&1 && { echo "Emulator_$n"; exit 0; }
+		done
+		k=$(emu_option_key_for_device)
+		echo "${k:-Emulator}"
+	) 2>/dev/null
+	KEY=$(printf '%s\n' "$KEY" | tail -1)
+	case "$KEY" in Emulator|Emulator_[A-Za-z0-9]*) ;; *) KEY=Emulator ;; esac
+	"$JQ" --arg key "$KEY" --arg game "$ROM" --arg core "$CORE" '.menuOptions[$key].overrides[$game] = $core' \
 		"$SAVED/config.json" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG" || exit 1
 	mkdir -p "$(dirname "$CACHE")" && printf '%s\n' "$folder" > "$CACHE" && sync || exit 1
-	echo "spruce-core: $EMU/$ROM -> $CORE ($folder)"
+	echo "spruce-core: $EMU/$ROM -> $CORE ($folder, $KEY)"
 	;;
 restore)
 	[ -d "$SAVED" ] || { echo "spruce-core: nothing saved for $EMU"; exit 0; }

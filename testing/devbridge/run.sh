@@ -11,6 +11,9 @@
 #   --identity KEY  SSH key (default ~/.ssh/id_ed25519)
 #   --user USER     SSH user for both devices (default root; spruce: spruce).
 #                   With $DEVBRIDGE_PASSWORD set, log in with that password.
+#                   A device given as USER@ADDR logs in as USER instead, with
+#                   $DEVBRIDGE_PASSWORD_USER if that is set (e.g. an A30 as
+#                   root and a Mini Flip as spruce@ADDR in one run).
 #   --keep-going    run every line even after a failure
 #   --play-only     the game is already running on both (another way of
 #                   starting it, such as pure RetroArch's menus): skip the
@@ -58,13 +61,22 @@ host=$1 guest=$2; shift 2
 askpass=
 if [ -n "${DEVBRIDGE_PASSWORD:-}" ]; then
 	askpass=$(mktemp "${TMPDIR:-/tmp}/netplay-askpass.XXXXXX")
-	printf '#!/bin/sh\nprintf "%%s\\n" "$DEVBRIDGE_PASSWORD"\n' > "$askpass"
+	# ssh's prompt is "USER@HOST's password: ": a per-user password wins.
+	cat > "$askpass" <<'ASKPASS'
+#!/bin/sh
+u=${1%%@*}
+case $u in *[!A-Za-z0-9_]*|'') u= ;; esac
+[ -n "$u" ] && eval "p=\${DEVBRIDGE_PASSWORD_$u:-}" && [ -n "$p" ] && { printf '%s\n' "$p"; exit 0; }
+printf '%s\n' "$DEVBRIDGE_PASSWORD"
+ASKPASS
 	chmod 700 "$askpass"
 	trap 'rm -f "$askpass"' EXIT
 fi
 
 sshd() {
 	addr=$1; shift
+	u=$user
+	case $addr in *@*) u=${addr%@*}; addr=${addr##*@} ;; esac
 	# adb shell ends its lines with CRLF.
 	case $addr in adb:*)
 		adb -s "${addr#adb:}" shell "$@" | tr -d '\r'
@@ -74,16 +86,16 @@ sshd() {
 		# Mixed fleets: some devices take the key, others only the password.
 		ssh -p "$port" -i "$identity" -o BatchMode=yes -o ConnectTimeout=10 \
 			-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
-			"$user@$addr" "$@" 2>/dev/null && return
+			"$u@$addr" "$@" 2>/dev/null && return
 		SSH_ASKPASS=$askpass SSH_ASKPASS_REQUIRE=force DEVBRIDGE_PASSWORD=$DEVBRIDGE_PASSWORD \
 			setsid -w ssh -p "$port" -o ConnectTimeout=10 -o PubkeyAuthentication=no \
 			-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
-			"$user@$addr" "$@"
+			"$u@$addr" "$@"
 		return
 	fi
 	ssh -p "$port" -i "$identity" -o BatchMode=yes -o ConnectTimeout=10 \
 		-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
-		"$user@$addr" "$@"
+		"$u@$addr" "$@"
 }
 
 # NextUI: the Tools/<platform> holding Netplay.pak. spruce: spruce-<the
