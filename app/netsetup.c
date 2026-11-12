@@ -1,4 +1,5 @@
 #include "netsetup.h"
+#include "engines.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -50,6 +51,7 @@ static NS_Protocol announce_protocol = NS_PROTO_LINKPLAY;
 static char announce_nick[NS_NICK_LEN];
 
 static char ns_platform[16] = "tg5040";
+static bool engine_own_core(const char* tag, char* core, int len);
 static char ns_pak[256];
 static char ns_state[256];
 static char ns_sd[128] = "/mnt/SDCARD";
@@ -469,8 +471,12 @@ static NS_Settings ns_set = {
 	.drastic = false,
 	.status_icon   = NS_ICON_OFF,
 	.quick_menu    = false,
-	.instanced     = NS_INST_OFF,
-	.inst_core     = { false, false },
+	.instanced     = NS_INST_SELECTED,
+#ifdef NETPLAY_SPRUCE
+	.inst_core     = { true, true },
+#else
+	.inst_core     = { true, false },
+#endif
 };
 static bool ns_set_loaded = false;
 
@@ -655,6 +661,10 @@ void NS_settingsLoad(void) {
 		}
 	}
 	fclose(f);
+	if (ns_set.instanced == NS_INST_OFF)
+		for (int i = 0; i < NS_INST_CORES; i++) ns_set.inst_core[i] = false;
+	else if (ns_set.instanced == NS_INST_ALL)
+		for (int i = 0; i < NS_INST_CORES; i++) ns_set.inst_core[i] = true;
 	/* The testing override is a stronger form of using packaged cores. Keep old
 	 * or hand-edited settings internally coherent rather than showing an
 	 * impossible Force=Yes / Use=No combination. */
@@ -736,29 +746,38 @@ bool NS_coreInstalled(const char* core) {
 	/* mGBA is intentionally installable from this pak, so its picker remains
 	 * available before an SD-card MGBA.pak exists. This path is platform-specific
 	 * and therefore also prevents unsupported devices enabling it. */
+#ifndef NETPLAY_SPRUCE
 	if (!strcmp(core, "mgba")) {
 		snprintf(p, sizeof(p), "%s/cores/mgba/%s/MGBA.pak/mgba_libretro.so",
 		         ns_pak, ns_platform);
 		return file_exists(p);
 	}
+#endif
 
 	system_core_path(core, p, sizeof(p));
 	if (file_exists(p)) return true;
 
-	snprintf(p, sizeof(p), "%s/cores/compatibility/%s/%s_libretro.so",
-	         ns_pak, compatibility_arch(), core);
-	if (file_exists(p)) return true;
+	/* These replacements are selected whenever their ordinary core is requested. */
+	if (!strcmp(core, "gambatte") || !strcmp(core, "gpsp")) {
+		snprintf(p, sizeof(p), "%s/cores/override/%s/%s_libretro.so", ns_pak, ns_platform, core);
+		if (file_exists(p)) return true;
+	}
 
+#ifndef NETPLAY_SPRUCE
 	char cmd[768];
 	snprintf(cmd, sizeof(cmd),
 	         "ls '%s/Emus/%s'/*.pak/%s_libretro.so >/dev/null 2>&1", ns_sd, ns_platform, core);
 	return system(cmd) == 0;
+#else
+	return false;
+#endif
 }
 
 /* Cores the shim drives, as install-stubs.sh's NETPLAY_CORES lists them. */
 static const char* const SHIM_CORES[] = {
 	"fceumm", "snes9x", "snes9x2005", "mednafen_supafaust",
 	"picodrive", "pcsx_rearmed", "gpsp", "gambatte", "armgba",
+	"genesis_plus_gx", "gearsystem",
 };
 
 /* A launch.sh that names the system's core: Netplay's bind-mount wrapper
@@ -804,6 +823,11 @@ NS_SystemState NS_systemStatus(const char* tag, char* core, int core_len) {
 	pclose(p);
 	line[strcspn(line, "\r\n")] = '\0';
 	if (!line[0]) return NS_SYS_ABSENT;
+	/* A session runs the table's engine, not spruce's pick, where it has one. */
+	if (engine_own_core(tag, line, sizeof(line))) {
+		if (core && core_len) snprintf(core, core_len, "%s", line);
+		return NS_SYS_READY;
+	}
 	if (core && core_len) snprintf(core, core_len, "%s", line);
 	for (size_t i = 0; i < sizeof(SHIM_CORES) / sizeof(SHIM_CORES[0]); i++)
 		if (!strcmp(line, SHIM_CORES[i])) return NS_SYS_READY;
@@ -912,6 +936,7 @@ bool NS_pakRestore(NS_ManagedPak pak, bool restore_pak, bool saves, bool states,
 static const char* MANIFEST_CORES[] = {
 	"fceumm", "picodrive", "snes9x", "snes9x2005", "gambatte", "gpsp",
 	"mgba", "mednafen_supafaust", "pcsx_rearmed", "armgba",
+	"genesis_plus_gx", "gearsystem",
 };
 
 uint32_t NS_runtimeGlibc(void) {
@@ -1220,11 +1245,12 @@ static uint32_t instanced_available_mask(void);
 #define INST_CAP_LINKOPTS (1u << 31)
 #define LINKOPTS_MAX 1024
 
-static const char* const ARMGBA_LINK_KEYS[] = {
+static const char* const LINK_KEYS[] = {
 	"armgba_link_mode", "armgba_link_players", "armgba_link_port",
 	"armgba_gb_link_port", "armgba_gb_link_timing", "armgba_gb_model",
+	"gpsp_serial",
 };
-#define ARMGBA_LINK_KEY_COUNT (sizeof(ARMGBA_LINK_KEYS) / sizeof(ARMGBA_LINK_KEYS[0]))
+#define LINK_KEY_COUNT (sizeof(LINK_KEYS) / sizeof(LINK_KEYS[0]))
 
 static char local_link_opts[LINKOPTS_MAX + 1];
 static char peer_link_opts[LINKOPTS_MAX + 1];
@@ -1256,26 +1282,285 @@ static bool opt_file_value(const char* path, const char* key, char* out, size_t 
 	return found;
 }
 
-/* This device's values, as "key=value\n" lines; a key no file sets is left
- * out (the core's own default applies). The same files, in the same order,
- * that launcher/common/core-route.sh reads. */
-static void read_local_link_opts(void) {
-	char files[2][512];
-	snprintf(files[0], sizeof(files[0]), "%s/RetroArch/.retroarch/config/armGBA/armGBA.opt", ns_sd);
-	snprintf(files[1], sizeof(files[1]), "%s/RetroArch/.retroarch/retroarch-core-options.cfg", ns_sd);
+static bool link_option_path(const char* key, char* path, size_t cap) {
+	for (size_t i = 0; i < LINK_KEY_COUNT; i++) {
+		if (strcmp(key, LINK_KEYS[i])) continue;
+		snprintf(path, cap, "%s/core-option.%s", ns_state, key);
+		return true;
+	}
+	return false;
+}
+
+static bool read_link_option(const char* key, char* value, size_t cap) {
+	char path[512];
+	if (!link_option_path(key, path, sizeof(path))) return false;
+	if (opt_file_value(path, key, value, cap)) return true;
+	if (strncmp(key, "armgba_", 7)) return false;
+	snprintf(path, sizeof(path), "%s/RetroArch/.retroarch/config/armGBA/armGBA.opt", ns_sd);
+	if (opt_file_value(path, key, value, cap)) return true;
+	snprintf(path, sizeof(path), "%s/RetroArch/.retroarch/retroarch-core-options.cfg", ns_sd);
+	return opt_file_value(path, key, value, cap);
+}
+
+bool NS_setLinkOption(const char* key, const char* value) {
+	char path[512], tmp[560];
+	if (!link_option_path(key, path, sizeof(path)) || !*value || strlen(value) >= 64 ||
+	    strpbrk(value, "\r\n\"")) return false;
+	snprintf(tmp, sizeof(tmp), "%s.tmp.XXXXXX", path);
+	int fd = mkstemp(tmp);
+	if (fd < 0) return false;
+	FILE* file = fdopen(fd, "w");
+	if (!file) {
+		close(fd);
+		unlink(tmp);
+		return false;
+	}
+	bool ok = fprintf(file, "%s = \"%s\"\n", key, value) >= 0;
+	if (fclose(file) != 0) ok = false;
+	if (ok && rename(tmp, path) == 0) return true;
+	unlink(tmp);
+	return false;
+}
+
+/* Leave unset values to the core defaults. */
+void NS_linkOptions(char* text, size_t cap) {
+	if (!cap) return;
 	size_t n = 0;
-	local_link_opts[0] = '\0';
-	for (size_t k = 0; k < ARMGBA_LINK_KEY_COUNT; k++) {
+	text[0] = '\0';
+	for (size_t k = 0; k < LINK_KEY_COUNT; k++) {
 		char v[64];
-		bool got = false;
-		for (int i = 0; i < 2 && !got; i++) got = opt_file_value(files[i], ARMGBA_LINK_KEYS[k], v, sizeof(v));
-		if (!got) continue;
-		int w = snprintf(local_link_opts + n, sizeof(local_link_opts) - n, "%s=%s\n",
-		                 ARMGBA_LINK_KEYS[k], v);
-		if (w < 0 || (size_t)w >= sizeof(local_link_opts) - n) break;
+		if (!read_link_option(LINK_KEYS[k], v, sizeof(v))) continue;
+		int w = snprintf(text + n, cap - n, "%s=%s\n", LINK_KEYS[k], v);
+		if (w < 0 || (size_t)w >= cap - n) {
+			text[n] = '\0';
+			break;
+		}
 		n += (size_t)w;
 	}
 }
+
+//////////////////////////////////////////////////////////////////////////////
+// engines: which core each system runs in a session (app/engines.c holds the
+// table). This part is the device's side: what it has, and the session lines.
+//////////////////////////////////////////////////////////////////////////////
+
+static bool link_opt_value(const char* text, const char* key, char* out, size_t cap);
+
+static int engine_device_tier(void) {
+	if (!strcmp(ns_platform, "my285")) return ENG_TIER_MINI;
+	if (!strcmp(ns_platform, "my282")) return ENG_TIER_A30;
+	return ENG_TIER_NORMAL;
+}
+
+/* Where this device would load an engine's core from; false if it cannot run
+ * the engine. *installable says the player could add it (NextUI's MGBA.pak,
+ * which Netplay installs from Cores). */
+static bool engine_local_core(const NS_Engine* e, char* out, int len, bool* installable) {
+	char p[512];
+	if (installable) *installable = false;
+	bool dual_ok = true;
+	if (!strcmp(e->name, "gambatte-dual") || !strcmp(e->name, "mgba-dual")) {
+		snprintf(p, sizeof(p), "%s/cores/override/%s/%s_dual_libretro.so",
+		         ns_pak, shared_platform(), e->core);
+		dual_ok = file_exists(p);
+	}
+#ifdef NETPLAY_SPRUCE
+	/* spruce's own RetroArch cores, for every engine. */
+	system_core_path(e->core, out, len);
+	return dual_ok && file_exists(out);
+#else
+	if (installed_core_path(e->core, out, len)) return dual_ok;
+	/* NextUI ships no Supafaust of its own outside the SUPA pak; Netplay's
+	 * packaged one is the same pinned build spruce runs. */
+	if (!strcmp(e->core, "mednafen_supafaust") && compatibility_core_path("snes9x", out, len))
+		return true;
+	if (!strcmp(e->core, "mgba") && installable)
+		*installable = dual_ok && NS_pakAvailable(NS_PAK_MGBA);
+	return false;
+#endif
+}
+
+static void engine_local_caps(NS_EngineCaps* caps) {
+	memset(caps, 0, sizeof(*caps));
+	caps->tier = engine_device_tier();
+	caps->is32 = platform_is_32bit();
+#ifdef NETPLAY_SPRUCE
+	caps->has_ra32 = !caps->is32;
+#endif
+	char path[512];
+	for (int i = 0; i < NS_engineCount(); i++)
+		caps->have[i] = engine_local_core(NS_engineAt(i), path, sizeof(path), &caps->installable[i]);
+}
+
+static void engine_caps_text(char* out, size_t len) {
+	NS_EngineCaps caps;
+	engine_local_caps(&caps);
+	NS_engineCapsEncode(&caps, out, len);
+}
+
+/* The agreed engines, "GBA:armgba-together,FC:fceumm,...", and advice for the
+ * players, "GBA:install-mgba:guest". Decided by the host, sent to the guest
+ * with the host's manifest; empty when the peer predates engines, which
+ * leaves every system to each device's own core, as before. */
+static char engine_choice[512];
+static char engine_hints[128];
+
+static bool list_lookup(const char* list, const char* system, char* out, size_t cap) {
+	size_t sl = strlen(system);
+	for (const char* p = list; p && *p; ) {
+		const char* end = strchr(p, ',');
+		size_t len = end ? (size_t)(end - p) : strlen(p);
+		if (len > sl && !strncmp(p, system, sl) && p[sl] == ':') {
+			size_t vl = len - sl - 1;
+			if (vl >= cap) return false;
+			memcpy(out, p + sl + 1, vl);
+			out[vl] = '\0';
+			return true;
+		}
+		p = end ? end + 1 : NULL;
+	}
+	return false;
+}
+
+static const NS_Engine* chosen_engine(const char* system) {
+	char name[48];
+	if (!list_lookup(engine_choice, system, name, sizeof(name))) return NULL;
+	return NS_engineAt(NS_engineIndex(name));
+}
+
+/* Host: the guest's capabilities came with its manifest. */
+static void decide_engines(void) {
+	engine_choice[0] = engine_hints[0] = '\0';
+	char text[512];
+	NS_EngineCaps host, guest;
+	if (!peer_link_opts_present ||
+	    !link_opt_value(peer_link_opts, "netplay_engines", text, sizeof(text)) ||
+	    !NS_engineCapsDecode(text, &guest)) {
+		ns_log("engines: the guest sent none (older build); each device runs its own cores\n");
+		return;
+	}
+	engine_local_caps(&host);
+	size_t n = 0, h = 0;
+	for (int s = 0; s < NS_engineSystemCount(); s++) {
+		const char* sys = NS_engineSystemAt(s);
+		char hint[64];
+		int e = NS_engineResolve(sys, &host, &guest, hint, sizeof(hint));
+		if (e >= 0 && n < sizeof(engine_choice))
+			n += (size_t)snprintf(engine_choice + n, sizeof(engine_choice) - n, "%s%s:%s",
+			                      n ? "," : "", sys, NS_engineAt(e)->name);
+		if (hint[0] && h < sizeof(engine_hints))
+			h += (size_t)snprintf(engine_hints + h, sizeof(engine_hints) - h, "%s%s:%s",
+			                      h ? "," : "", sys, hint);
+	}
+	if (n >= sizeof(engine_choice) || h >= sizeof(engine_hints)) {
+		ns_log("engines: decision too long; each device runs its own cores\n");
+		engine_choice[0] = engine_hints[0] = '\0';
+		return;
+	}
+	ns_log("engines: tiers host=%d guest=%d -> %s%s%s\n", host.tier, guest.tier, engine_choice,
+	       engine_hints[0] ? " | hints " : "", engine_hints);
+}
+
+/* Guest: take the host's decision, keeping only engines this device has. */
+static void accept_host_engines(void) {
+	engine_choice[0] = engine_hints[0] = '\0';
+	char text[512];
+	if (!peer_link_opts_present ||
+	    !link_opt_value(peer_link_opts, "engines_chosen", text, sizeof(text))) {
+		ns_log("engines: the host decided none (older build); each device runs its own cores\n");
+		return;
+	}
+	NS_EngineCaps mine;
+	engine_local_caps(&mine);
+	size_t n = 0;
+	for (const char* p = text; *p; ) {
+		const char* end = strchr(p, ',');
+		size_t len = end ? (size_t)(end - p) : strlen(p);
+		char item[64] = "";
+		if (len < sizeof(item)) { memcpy(item, p, len); item[len] = '\0'; }
+		char* colon = strchr(item, ':');
+		int e = colon ? NS_engineIndex(colon + 1) : -1;
+		if (e >= 0 && mine.have[e] && n < sizeof(engine_choice))
+			n += (size_t)snprintf(engine_choice + n, sizeof(engine_choice) - n, "%s%s", n ? "," : "", item);
+		else if (item[0])
+			ns_log("engines: host chose %s, which this device cannot run; keeping its own core\n", item);
+		p = end ? end + 1 : p + len;
+	}
+	if (n >= sizeof(engine_choice)) engine_choice[0] = '\0';
+	if (!link_opt_value(peer_link_opts, "engine_hints", engine_hints, sizeof(engine_hints)))
+		engine_hints[0] = '\0';
+	ns_log("engines: host chose %s%s%s\n", engine_choice, engine_hints[0] ? " | hints " : "", engine_hints);
+}
+
+/* engine.<SYS>= the agreed engine, engine_core.<SYS>= where this device loads
+ * it from (the launchers read only this), engine_hint.<SYS>= the advice the
+ * shim shows when gpSP cannot link the game. The paired cores follow the
+ * engines: instanced_gambatte/instanced_mgba are rewritten to match. */
+static bool write_engines_file(const char* path) {
+	char tmp[560];
+	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+	FILE* in = fopen(path, "r");
+	if (!in) return false;
+	FILE* out = fopen(tmp, "w");
+	if (!out) { fclose(in); return false; }
+	const bool decided = engine_choice[0] != '\0';
+	char line[700];
+	while (fgets(line, sizeof(line), in)) {
+		if (!strncmp(line, "engine.", 7) || !strncmp(line, "engine_core.", 12) ||
+		    !strncmp(line, "engine_hint.", 12)) continue;
+		if (decided && (!strncmp(line, "instanced_gambatte=", 19) ||
+		                !strncmp(line, "instanced_mgba=", 15))) continue;
+		fputs(line, out);
+	}
+	bool gambatte_dual = false, mgba_dual = false;
+	for (int s = 0; decided && s < NS_engineSystemCount(); s++) {
+		const char* sys = NS_engineSystemAt(s);
+		const NS_Engine* e = chosen_engine(sys);
+		if (!e) continue;
+		char core[512];
+		if (!engine_local_core(e, core, sizeof(core), NULL)) continue;
+		fprintf(out, "engine.%s=%s\nengine_core.%s=%s\n", sys, e->name, sys, core);
+		if (!strcmp(e->name, "gambatte-dual")) gambatte_dual = true;
+		if (!strcmp(e->name, "mgba-dual")) mgba_dual = true;
+		char hint[64];
+		if (list_lookup(engine_hints, sys, hint, sizeof(hint)))
+			fprintf(out, "engine_hint.%s=%s\n", sys, hint);
+	}
+	if (decided)
+		fprintf(out, "instanced_gambatte=%d\ninstanced_mgba=%d\n", gambatte_dual, mgba_dual);
+	fclose(in);
+	if (fclose(out) != 0 || rename(tmp, path) != 0) {
+		remove(tmp);
+		return false;
+	}
+	return true;
+}
+
+static bool settle_engines(void) {
+	char path[512];
+	bool ok = true;
+	snprintf(path, sizeof(path), "%s/session.conf", ns_state);
+	ok &= write_engines_file(path);
+	snprintf(path, sizeof(path), "%s/session", ns_state);
+	ok &= write_engines_file(path);
+	if (!ok) ns_log("cannot write the session's engines\n");
+	return ok;
+}
+
+/* The core this device would run for a system on its own (a session with a
+ * device like it): what the Cores screen shows. */
+static bool engine_own_core(const char* tag, char* core, int len) {
+	const char* sys = NS_engineSystem(tag);
+	if (!sys) return false;
+	NS_EngineCaps caps;
+	engine_local_caps(&caps);
+	int e = NS_engineResolve(sys, &caps, &caps, NULL, 0);
+	if (e < 0) return false;
+	snprintf(core, len, "%s", NS_engineAt(e)->core);
+	return true;
+}
+
+bool NS_engineCore(const char* tag, char* core, int len) { return engine_own_core(tag, core, len); }
 
 static bool link_opt_value(const char* text, const char* key, char* out, size_t cap) {
 	size_t kl = strlen(key);
@@ -1307,18 +1592,27 @@ static bool link_mode_plays(const char* v) {
 static void agree_link_options(const char* host, const char* guest, char* out, size_t cap) {
 	size_t n = 0;
 	out[0] = '\0';
-	for (size_t k = 0; k < ARMGBA_LINK_KEY_COUNT; k++) {
-		const char* key = ARMGBA_LINK_KEYS[k];
+	char capability[4];
+	bool gpsp = link_opt_value(host, "gpsp_serial_supported", capability, sizeof(capability)) &&
+	            link_opt_value(guest, "gpsp_serial_supported", capability, sizeof(capability));
+	for (size_t k = 0; k < LINK_KEY_COUNT; k++) {
+		const char* key = LINK_KEYS[k];
+		if (!gpsp && !strcmp(key, "gpsp_serial")) continue;
 		char hv[64] = "", gv[64] = "";
 		bool hs = link_opt_value(host, key, hv, sizeof(hv));
 		bool gs = link_opt_value(guest, key, gv, sizeof(gv));
 		const char* v;
-		if (!strcmp(key, "armgba_link_mode"))
+		const NS_Engine* gba = chosen_engine("GBA");
+		if (!strcmp(key, "armgba_link_mode") && gba && !strcmp(gba->core, "armgba"))
+			/* The session's engine decides: Together, or Separate where
+			 * the slower device cannot keep Together at speed. */
+			v = gba->mode;
+		else if (!strcmp(key, "armgba_link_mode"))
 			v = hs && link_mode_plays(hv) ? hv : gs && link_mode_plays(gv) ? gv : "separate";
 		else
 			v = hs ? hv : gs ? gv : NULL;
 		if (hs != gs || (hs && strcmp(hv, gv)) || (v && hs && strcmp(v, hv)))
-			ns_log("armGBA %s: host=%s guest=%s -> %s\n", key,
+			ns_log("Link option %s: host=%s guest=%s -> %s\n", key,
 			       hs ? hv : "(unset)", gs ? gv : "(unset)", v ? v : "(core default)");
 		if (!v) continue;
 		int w = snprintf(out + n, cap - n, "%s=%s\n", key, v);
@@ -1327,7 +1621,7 @@ static void agree_link_options(const char* host, const char* guest, char* out, s
 	}
 }
 
-/* Rewrites only the armGBA lines: armgba_link_mode= for the shim's path,
+/* Rewrites the agreed link options: armgba_link_mode= for the shim's path,
  * option.<key>= for the values the shim forces into the core, and
  * armgba_link_agreed= so a launch can tell an agreement from a session armed
  * by a build that had none. agreed NULL removes them. */
@@ -1341,6 +1635,7 @@ static bool write_link_options_file(const char* path, const char* agreed) {
 	char line[512];
 	while (fgets(line, sizeof(line), in))
 		if (strncmp(line, "option.armgba_", 14) &&
+		    strncmp(line, "option.gpsp_serial=", 19) &&
 		    strncmp(line, "armgba_link_mode=", 17) &&
 		    strncmp(line, "armgba_link_agreed=", 19)) fputs(line, out);
 	if (agreed) {
@@ -1390,7 +1685,24 @@ static bool settle_link_options(bool we_host) {
 }
 
 static bool send_manifest_to(int fd, NS_CoreInfo* m, int n, long budget_ms) {
-	read_local_link_opts();
+	static const char gpsp_capability[] = "gpsp_serial_supported=1\n";
+	NS_linkOptions(local_link_opts, sizeof(local_link_opts) - sizeof(gpsp_capability));
+	strcat(local_link_opts, gpsp_capability);
+	/* Not link options: the block is this build's one free-form channel, and
+	 * agree_link_options only looks up the keys it knows, so an older peer
+	 * ignores these lines. Every device sends what it can run; the host also
+	 * sends what it decided (see decide_engines). */
+	char caps[512];
+	engine_caps_text(caps, sizeof(caps));
+	size_t used = strlen(local_link_opts);
+	int w = snprintf(local_link_opts + used, sizeof(local_link_opts) - used, "netplay_engines=%s\n", caps);
+	if (w > 0 && (size_t)w < sizeof(local_link_opts) - used) used += (size_t)w;
+	else local_link_opts[used] = '\0';
+	if (engine_choice[0]) {
+		w = snprintf(local_link_opts + used, sizeof(local_link_opts) - used,
+		             "engines_chosen=%s\nengine_hints=%s\n", engine_choice, engine_hints);
+		if (w <= 0 || (size_t)w >= sizeof(local_link_opts) - used) local_link_opts[used] = '\0';
+	}
 	uint32_t hdr[5] = { htonl(CORE_MAGIC), htonl((uint32_t)n),
 	                    htonl(NS_settings()->compatibility_cores ? 1u : 0u),
 	                    htonl(NS_settings()->force_compatibility ? 1u : 0u),
@@ -1724,6 +2036,7 @@ void NS_compatServeTick(void) {
 	int tn = recv_manifest_to(fd, theirs, NS_MAX_MANIFEST, CORE_SERVE_IO_MS,
 	                          &peer_compat_enabled, &peer_force_compatibility,
 	                          &peer_instanced);
+	if (tn >= 0) decide_engines();
 	if (tn < 0 ||
 	    !send_manifest_to(fd, mine, n, CORE_SERVE_IO_MS)) {
 		ns_log("core compatibility negotiation: manifest failed "
@@ -1740,6 +2053,7 @@ void NS_compatServeTick(void) {
 	else
 		ns_log("core compatibility negotiation: %d fallback(s) selected\n", selected);
 	settle_link_options(true);
+	settle_engines();
 
 	close(fd);
 }
@@ -1787,6 +2101,7 @@ int NS_compatSync(const char* host_ip, char* err, int errlen) {
 	bool peer_compat_enabled = false;
 	bool peer_force_compatibility = false;
 	uint32_t peer_instanced = 0;
+	engine_choice[0] = engine_hints[0] = '\0';   /* a guest sends no decision */
 	if (!send_manifest_to(fd, mine, n, CORE_IO_MS)) {
 		close(fd);
 		snprintf(err, errlen, "manifest exchange failed");
@@ -1806,6 +2121,7 @@ int NS_compatSync(const char* host_ip, char* err, int errlen) {
 		return -1;
 	}
 
+	accept_host_engines();
 	int selected = select_compatibility(mine, n, theirs, tn,
 	                                    peer_compat_enabled, peer_force_compatibility,
 	                                    peer_instanced);
@@ -1815,6 +2131,9 @@ int NS_compatSync(const char* host_ip, char* err, int errlen) {
 		snprintf(err, errlen, "cannot activate core selection");
 	else if (!settle_link_options(false)) {
 		snprintf(err, errlen, "cannot write the agreed armGBA options");
+		selected = -1;
+	} else if (!settle_engines()) {
+		snprintf(err, errlen, "cannot write the session's cores");
 		selected = -1;
 	}
 
@@ -2536,6 +2855,11 @@ static bool file_contains(const char* path, const char* needle) {
 	return found;
 }
 
+bool NS_dsperateLanAvailable(const char* path) {
+	return file_contains(path, "--lan-host") && file_contains(path, "--lan-join") &&
+	       file_contains(path, "--no-autoload");
+}
+
 /* A name a person would recognise: the setting; else what NextUI calls the
  * device (its launcher exports DEVICE, and TRIMUI_MODEL on the TrimUIs, from
  * the stock MainUI's own model string, which is read here too when the app
@@ -2704,6 +3028,19 @@ bool NS_arm(NS_Role role, const char* peer_ip, char* err, int errlen) {
 	 * intersection of artifacts/settings available on both devices. */
 	fprintf(f, "instanced_gambatte=%d\n", instanced_core_enabled("gambatte") ? 1 : 0);
 	fprintf(f, "instanced_mgba=%d\n", instanced_core_enabled("mgba") ? 1 : 0);
+	if (protocol == NS_PROTO_LINKPLAY) {
+		for (size_t k = 0; k < LINK_KEY_COUNT; k++) {
+			const char* key = LINK_KEYS[k];
+			char option_path[512], value[64];
+			if (!link_option_path(key, option_path, sizeof(option_path)) ||
+			    !opt_file_value(option_path, key, value, sizeof(value))) continue;
+			if (!strcmp(key, "armgba_link_mode")) {
+				if (!link_mode_plays(value)) continue;
+				fprintf(f, "armgba_link_mode=%s\n", value);
+			}
+			fprintf(f, "option.%s=%s\n", key, value);
+		}
+	}
 
 	/* Record the ad hoc network so the launch stub can put us back on it. The
 	 * join done here does not survive the app exiting - the platform brings its

@@ -47,7 +47,7 @@ ifeq (,$(filter $(FIRMWARE),nextui spruce))
 $(error invalid FIRMWARE '$(FIRMWARE)'. Supported: nextui spruce)
 endif
 
-SOURCE   = main.c netsetup.c hints.c onboarding.c qoi.c nextui/chordcap.c \
+SOURCE   = main.c netsetup.c engines.c hints.c onboarding.c qoi.c nextui/chordcap.c \
            $(COMMON)/api.c $(COMMON)/utils.c $(COMMON)/config.c $(COMMON)/scaler.c \
            $(PLATDIR)/platform.c
 
@@ -101,14 +101,14 @@ all: $(if $(SPRUCE_INC),$(SPRUCE_INC)/platform.h)
 	@mkdir -p $(BIN)
 	$(CROSS_COMPILE)gcc $(SOURCE) -o $(PRODUCT) $(CFLAGS) $(LDFLAGS)
 	@echo "built $(PRODUCT)"
-	$(CROSS_COMPILE)gcc broker.c netsetup.c -o $(BROKER_PRODUCT) $(CFLAGS) $(BROKER_LDFLAGS)
+	$(CROSS_COMPILE)gcc broker.c netsetup.c engines.c -o $(BROKER_PRODUCT) $(CFLAGS) $(BROKER_LDFLAGS)
 	@echo "built $(BROKER_PRODUCT)"
 	$(CROSS_COMPILE)gcc wifi-ps.c -o $(WIFIPS_PRODUCT) -O2 -s -Wall -std=gnu99
 	@echo "built $(WIFIPS_PRODUCT)"
 ifeq (nextui,$(FIRMWARE))
 	# Like the broker: netsetup.c's hosting without the frontend. It reads
 	# evdev itself and has Varnish draw, so it links no SDL at all.
-	$(CROSS_COMPILE)gcc nextui/quickmenu.c netsetup.c -o $(QUICKMENU_PRODUCT) $(CFLAGS) $(BROKER_LDFLAGS)
+	$(CROSS_COMPILE)gcc nextui/quickmenu.c netsetup.c engines.c -o $(QUICKMENU_PRODUCT) $(CFLAGS) $(BROKER_LDFLAGS)
 	@echo "built $(QUICKMENU_PRODUCT)"
 endif
 

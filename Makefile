@@ -714,6 +714,8 @@ check-spruce-app-%:
 		echo "missing bin/spruce/$*/netplay.elf - run 'make app-spruce' first"; exit 1; }
 
 test:
+	@cc -Wall -I app -o /tmp/netplay-engines-test testing/engines-test.c app/engines.c && /tmp/netplay-engines-test
+	@/tmp/netplay-engines-test --matrix | diff -u docs/engine-matrix.md - || { echo "docs/engine-matrix.md is stale: regenerate with --matrix"; exit 1; }
 	@./shim/test/run.sh
 	@./shim/test/link.sh
 	@./shim/test/dual.sh

@@ -47,6 +47,18 @@ for a in "$@"; do
 	ROM="$a"
 done
 
+# The core the session agreed for this system (np_engine_core), from the
+# same cores directory as spruce's pick. The shim is still staged under
+# spruce's core's filename (SPRUCE_CORE), as for the paired Gambatte, so only
+# what loads behind it changes.
+SPRUCE_CORE="$CORE"
+. "$NP/launcher/core-route.sh"
+ENGINE_CORE=$(np_engine_core "$ROM")
+if [ -n "$ENGINE_CORE" ] && [ "$ENGINE_CORE" != "$CORE" ]; then
+	echo "[netplay] session core $(basename "$ENGINE_CORE" _libretro.so) in place of $(basename "$CORE" _libretro.so)" >&2
+	CORE="$ENGINE_CORE"
+fi
+
 # Word size. A session paired with a 32-bit device (an A30, which only has
 # RetroArch32) carries compat_ra32=1 from core negotiation: this device
 # then runs spruce's 32-bit RetroArch with spruce's 32-bit cores and the
@@ -73,6 +85,9 @@ if [ "$SHIM_PLATFORM" != "my282" ] && [ -n "$NETPLAY_SESSION" ] &&
 			# spruce named the 64-bit core; its 32-bit twin ships beside it.
 			case "$CORE" in
 				*/cores64/*) CORE="${CORE%/cores64/*}/cores/${CORE##*/}" ;;
+			esac
+			case "$SPRUCE_CORE" in
+				*/cores64/*) SPRUCE_CORE="${SPRUCE_CORE%/cores64/*}/cores/${SPRUCE_CORE##*/}" ;;
 			esac
 			# spruce layers a per-device 32-bit overlay over the platform
 			# cfg when it launches this binary itself (fbdev_mali video
@@ -112,7 +127,8 @@ fi
 case "$(basename "$CORE")" in
 	fceumm_libretro.so|snes9x_libretro.so|snes9x2005_libretro.so|\
 	mednafen_supafaust_libretro.so|picodrive_libretro.so|pcsx_rearmed_libretro.so|\
-	gpsp_libretro.so|gambatte_libretro.so|mgba_libretro.so|armgba_libretro.so) ;;
+	gpsp_libretro.so|gambatte_libretro.so|mgba_libretro.so|armgba_libretro.so|\
+	genesis_plus_gx_libretro.so|gearsystem_libretro.so) ;;
 	*) PLATFORM="$SPRUCE_PLATFORM" exec "$REAL_RA" "$@" ;;
 esac
 
@@ -125,8 +141,7 @@ fi
 # Rejoin the ad hoc network, Wi-Fi power save: as for every NextUI pak.
 . "$NP/launcher/pre-launch.sh"
 
-. "$NP/launcher/core-route.sh"
-np_route_core "$CORE"
+np_route_core "$SPRUCE_CORE" "$CORE"
 np_stage_shim || PLATFORM="$SPRUCE_PLATFORM" exec "$REAL_RA" "$@"
 
 # The same command line with the shim as the core.

@@ -165,7 +165,9 @@ def session_active() -> bool:
 
 def menu(title: str, rows: list[tuple[str, str, str, str]], hint: str = "A SELECT    B BACK",
          selected: int = 0, extra: tuple[str, ...] = (),
-         actions: dict[str, str | None] | None = None, back: str = "BACK") -> tuple[str, str] | None:
+         actions: dict[str, str | None] | None = None, back: str = "BACK",
+         pin_last: bool = False, headings: frozenset[str] = frozenset(),
+         compact_rows: frozenset[str] | None = None) -> tuple[str, str] | None:
     global HINT, FOOTER_CONTEXT
     from controller.controller_inputs import ControllerInput
     from views.grid_or_list_entry import GridOrListEntry
@@ -179,6 +181,20 @@ def menu(title: str, rows: list[tuple[str, str, str, str]], hint: str = "A SELEC
     if not entries:
         entries = [GridOrListEntry("Nothing found", description="B to go back", value="empty")]
     view = ViewCreator.create_view(ViewType.ICON_AND_DESC, entries, title, selected_index=selected)
+    if compact_rows is not None:
+        from .core_list import style_rows
+        style_rows(view, rows, headings, compact_rows)
+    if pin_last:
+        pin_last_row(view, len(rows) - 1, rows[-1][1])
+    if headings:
+        adjust = view.adjust_selected
+
+        def skip_headings(amount, skip_by_letter):
+            adjust(amount, skip_by_letter)
+            while rows[view.selected][0] in headings:
+                adjust(1 if amount > 0 else -1, False)
+
+        view.adjust_selected = skip_headings
     from .buttons import Button
     from .footer import hints
 
@@ -205,9 +221,10 @@ def menu(title: str, rows: list[tuple[str, str, str, str]], hint: str = "A SELEC
                 continue
             if pressed == ControllerInput.B:
                 return None
-            if pressed == ControllerInput.A and actions is not None:
+            if pressed in accepted and actions is not None:
                 key = str(selection.get_selection().value)
-                if not actions.get(key, "SELECT"):
+                collapsing = compact_rows is not None and pressed.name == "DPAD_LEFT"
+                if not collapsing and not actions.get(key, "SELECT"):
                     continue
             if pressed in accepted and pressed != ControllerInput.B:
                 return str(selection.get_selection().value), pressed.name
@@ -216,6 +233,54 @@ def menu(title: str, rows: list[tuple[str, str, str, str]], hint: str = "A SELEC
         finished = getattr(view, "view_finished", None)
         if finished:
             finished()
+
+
+def pin_last_row(view, index: int, label: str) -> None:
+    from devices.device import Device
+    from display.display import Display
+    from display.font_purpose import FontPurpose
+    from display.render_mode import RenderMode
+    from display.resize_type import ResizeType
+    from themes.theme import Theme
+
+    render = view._render
+    hit_test = getattr(view, "row_at_touch_point", None)
+    height = view.each_entry_height
+    width = Device.get_device().screen_width()
+    bottom = Device.get_device().screen_height() - Display.bottom_bar.get_bottom_bar_height()
+    y = bottom - height
+    top = Display.get_top_bar_height(force_include_top_bar=True) + 5
+    view.max_rows = max(1, (bottom - top) // height)
+    view.current_top = 0
+    view.current_bottom = min(view.max_rows, len(view.options))
+    view.center_selection()
+
+    def render_with_pinned_row():
+        end = view.current_bottom
+        view.current_bottom = min(end, index)
+        try:
+            render()
+        finally:
+            view.current_bottom = end
+        purpose = FontPurpose.DESCRIPTIVE_LIST_TITLE
+        if view.selected == index:
+            Display.render_image(view.selected_bg, 0, y, target_width=width,
+                                 target_height=height, resize_type=ResizeType.ZOOM)
+            color = Theme.text_color_selected(purpose)
+        else:
+            color = Theme.text_color(purpose)
+        x = Theme.get_descriptive_list_icon_offset_x() + Theme.get_descriptive_list_text_from_icon_offset()
+        Display.render_text(label, x, y + height // 2, color, purpose, RenderMode.MIDDLE_LEFT_ALIGNED)
+
+    def pinned_hit_test(point):
+        if point is not None and y <= point[1] < bottom:
+            return index
+        hit = hit_test(point)
+        return hit if hit != index else None
+
+    view._render = render_with_pinned_row
+    if hit_test:
+        view.row_at_touch_point = pinned_hit_test
 
 
 def message(title: str, detail: str) -> bool:
@@ -454,60 +519,194 @@ def settings() -> None:
             attempt("Settings", "Applying change", "set", key, value)
 
 
-def core_rows(output: str) -> tuple[list[tuple[str, str, str, str]], dict[str, str | None]]:
-    """Combine spruce systems, keeping readiness separate from core names."""
-    values = fields(output)
-    descriptions = {p[1]: p[2] for line in output.splitlines()
-                    if len(p := line.split("\t")) == 3 and p[0] == "core_hint"}
-    names = {"FC": "FCEUmm", "SFC": "Snes9x", "MD": "PicoDrive", "PS": "PCSX ReARMed",
-             "32X": "PicoDrive", "FDS": "FCEUmm", "GG": "PicoDrive", "SMS": "PicoDrive",
-             "SG1000": "PicoDrive", "SEGACD": "PicoDrive"}
-    rows, actions, ds = [], {}, []
+CORE_GROUPS = (
+    ("GB", "GB/GBC"), ("GBA", "GBA"), ("GG", "Game Gear"), ("NDS", "NDS"),
+    ("FC", "NES / FC"), ("SFC", "SNES / SFC"), ("MD", "Genesis / MegaDrive"),
+    ("SEGACD", "SegaCD / 32X"), ("SMS", "Master System"), ("PS", "PS"),
+)
+CORE_HEADINGS = frozenset(("link", "shared"))
+
+
+def core_engines(output: str) -> dict[str, list[tuple[str, str, str, bool]]]:
+    engines = {tag: [] for tag, _ in CORE_GROUPS}
     for line in output.splitlines():
         parts = line.split("\t")
-        if len(parts) != 6 or parts[0] != "core": continue
-        _, _, tag, label, state, more = parts
-        if tag in ("NDS", "DSP"):
-            ds.append((tag, state)); continue
-        paired = state in ("dual", "paired", "instanced")
-        mark = "✓✓" if paired else "✓" if state == "ready" else "○" if state in ("present", "installed", "off") else "–"
-        detail = descriptions.get(tag, names.get(tag, tag))
-        if tag == "GB": detail = "Gambatte" + (", Gambatte Dual" if paired else "")
-        elif tag == "GBA": detail = "gpSP (Wireless Adapter, AW/Gen 3 Pkmn)" + (", mGBA Dual" if paired else "")
-        if descriptions.get(tag, "").lower() == "armgba":
-            detail = "armGBA (Link Mode in its core options: Separate links, Together shares)"
-        rows.append((tag, label, detail, mark))
-        available = values.get("gambatte_dual" if tag == "GB" else "mgba_dual") == "1"
-        actions[tag] = "CHANGE" if tag in ("GB", "GBA") and more == "1" and available else None
-    if ds:
-        ready = any(state == "ready" for _, state in ds)
-        present = any(state not in ("absent", "unavailable") for _, state in ds)
-        engines = ["DraStic" if tag == "NDS" else "DSperate" for tag, state in ds if state not in ("absent", "unavailable")]
-        rows.append(("NDS", "NDS", ", ".join(engines) or "DraStic, DSperate", "✓" if ready else "○" if present else "–"))
-        actions["NDS"] = None
-    return sorted(rows, key=lambda row: row[0]), actions
+        if len(parts) != 6 or parts[0] != "core_engine":
+            continue
+        _, tag, core, label, state, more = parts
+        if tag in engines and state not in ("absent", "unavailable"):
+            engines[tag].append((core, label, state, more == "1"))
+    return engines
+
+
+def core_rows(output: str, expanded: set[str] | None = None):
+    expanded = expanded or set()
+    engines = core_engines(output)
+    rows, actions = [], {}
+    for tag, label in CORE_GROUPS:
+        if tag in ("GB", "FC"):
+            key = "link" if tag == "GB" else "shared"
+            rows.append((key, "Link Play" if key == "link" else "Shared Screen", "", ""))
+            actions[key] = None
+        if len(engines[tag]) == 1:
+            core, name, state, more = engines[tag][0]
+            mark = "✓" if state in ("ready", "dual", "paired", "instanced") else "○"
+            rows.append((tag, f"{label} ({name})", "", mark + ("  >" if more else "")))
+            actions[tag] = "SELECT" if more else None
+            continue
+        if not engines[tag]:
+            rows.append((tag, label, "", ""))
+            actions[tag] = None
+            continue
+        rows.append((tag, label, "", "▾"))
+        actions[tag] = "COLLAPSE" if tag in expanded else "EXPAND"
+        if tag not in expanded:
+            continue
+        for core, name, state, more in engines[tag]:
+            key = f"{tag}/{core}"
+            mark = "✓" if state in ("ready", "dual", "paired", "instanced") else "○"
+            rows.append((key, name, "", mark + ("  >" if more else "")))
+            actions[key] = "SELECT" if more else None
+    return rows, actions
+
+
+DUAL_CHOICES = (("0", "No"), ("1", "Yes"))
+GPSP_CABLE = (("mul_poke", "Pokémon Gen III"), ("mul_aw1", "Advance Wars 1"), ("mul_aw2", "Advance Wars 2"))
+ARMGBA_COMMON = (
+    ("armgba_link_players", "Number of Players", (("2", "2"), ("3", "3"), ("4", "4"))),
+)
+CORE_OPTIONS = {
+    "GB": (
+        ("armGBA", ARMGBA_COMMON + (
+            ("armgba_gb_link_port", "Link Port", (("cable", "Link Cable"), ("adapter", "Four Player Adapter"))),
+            ("armgba_gb_link_timing", "Link Timing", (("standard", "Standard"), ("exact", "Exact"))),
+            ("armgba_gb_model", "Game Boy Model", tuple((model, model) for model in
+                ("Auto", "Game Boy", "Game Boy Pocket", "Game Boy Color", "Game Boy Advance"))),
+        )),
+    ),
+    "GBA": (
+        ("gpSP", (("gpsp_mode", "Link Type", (
+            ("auto", "Automatic"), ("rfu", "Wireless Adapter"), ("cable", "Link Cable"),
+        )),)),
+        ("armGBA", ARMGBA_COMMON + (
+            ("armgba_link_port", "Link Port", (("cable", "Link Cable"), ("wireless", "Wireless Adapter"))),
+        )),
+    ),
+}
+
+
+def core_options(tag: str, title: str, output: str, engine: str | None = None) -> bool:
+    values = fields(output)
+    dual = {"inst_gambatte": "gambatte_dual", "inst_mgba": "mgba_dual"}
+    sections = CORE_OPTIONS.get(tag, ())
+    if engine is not None:
+        sections = tuple((name, options) for name, options in sections if name.lower() == engine)
+    # Which core, paired or not, and armGBA's Link Mode are Netplay's call
+    # (app/engines.c): a core with only those has nothing here.
+    if not sections:
+        return False
+    selected = 0
+    changed = False
+    cable_game = values.get("gpsp_serial", "")
+    if cable_game not in dict(GPSP_CABLE):
+        cable_game = GPSP_CABLE[0][0]
+    while True:
+        rows, actions, choices = [], {}, {}
+        for core, options in sections:
+            if core == "gpSP":
+                serial = values.get("gpsp_serial", "auto")
+                values["gpsp_mode"] = "cable" if serial in dict(GPSP_CABLE) else serial
+                if values["gpsp_mode"] == "cable":
+                    options += (("gpsp_serial", "Cable Game", GPSP_CABLE),)
+            for key, label, options_for_key in options:
+                available = key not in dual or values.get(dual[key]) == "1"
+                labels = dict(options_for_key)
+                current = values.get(key)
+                value = f"< {labels.get(current, options_for_key[0][1])} >" if available else "Unavailable"
+                rows.append((key, "  " + label, "", value))
+                actions[key] = "CHANGE" if available else None
+                choices[key] = [option for option, _ in options_for_key]
+        picked = menu(title, rows, selected=selected, extra=("DPAD_LEFT", "DPAD_RIGHT"),
+                      actions=actions)
+        if picked is None:
+            return changed
+        key, pressed = picked
+        selected = next(i for i, row in enumerate(rows) if row[0] == key)
+        options = choices[key]
+        direction = -1 if pressed == "DPAD_LEFT" else 1
+        current = values.get(key, options[0])
+        index = options.index(current) if current in options else 0
+        value = options[(index + direction) % len(options)]
+        if key == "gpsp_mode":
+            key = "gpsp_serial"
+            value = cable_game if value == "cable" else value
+        command = "set" if key in dual else "core-option"
+        try:
+            control(command, key, value)
+        except RuntimeError as error:
+            message(title, str(error))
+        else:
+            values[key] = value
+            if key == "gpsp_serial" and value in dict(GPSP_CABLE):
+                cable_game = value
+            changed = True
 
 
 def cores() -> None:
     try:
-        if not CORE_READY.is_set(): working("Cores", "Checking cores", CORE_READY.wait)
+        if not CORE_READY.is_set():
+            working("Cores", "Checking cores", CORE_READY.wait)
         ok, output = CORE_RESULTS["all"]
-        if not ok: output = working("Cores", "Checking cores", lambda: control("cores"))
+        if not ok:
+            output = working("Cores", "Checking cores", lambda: control("cores"))
     except Exception as error:
-        message("Cores", str(error)); return
-    selected = 0
+        message("Cores", str(error))
+        return
+    selected_key = "GB"
+    expanded = set()
     while True:
-        rows, actions = core_rows(output)
-        picked = menu("Cores", rows, selected=selected, actions=actions)
-        if picked is None: return
-        tag = picked[0]
-        selected = next(i for i, row in enumerate(rows) if row[0] == tag)
-        setting = "inst_gambatte" if tag == "GB" else "inst_mgba"
-        current = "1" if rows[selected][3] == "✓✓" else "0"
-        if confirm(tag, "Turn paired play " + ("off" if current == "1" else "on") + "?"):
-            if attempt(tag, "Saving core choice", "set", setting, "0" if current == "1" else "1"):
+        rows, actions = core_rows(output, expanded)
+        selected = next((i for i, row in enumerate(rows) if row[0] == selected_key), 1)
+        compact = frozenset(key for key, *_ in rows if "/" in key)
+        picked = menu("Cores", rows, selected=selected, actions=actions,
+                      extra=("DPAD_LEFT", "DPAD_RIGHT"), headings=CORE_HEADINGS, compact_rows=compact)
+        if picked is None:
+            if expanded:
+                expanded.clear()
+                selected_key = selected_key.partition("/")[0]
+                continue
+            return
+        selected_key, pressed = picked
+        tag, _, engine = selected_key.partition("/")
+        if engine and pressed == "DPAD_LEFT":
+            expanded.discard(tag)
+            selected_key = tag
+            continue
+        available = core_engines(output)[tag]
+        if not engine and len(available) == 1:
+            if pressed == "DPAD_LEFT":
+                continue
+            engine, label, _, _ = available[0]
+        elif not engine:
+            if pressed == "DPAD_LEFT":
+                expanded.discard(tag)
+            elif pressed == "DPAD_RIGHT":
+                expanded.add(tag)
+            elif tag in expanded:
+                expanded.remove(tag)
+            else:
+                expanded.add(tag)
+            continue
+        if "/" in selected_key:
+            label = next(row[1] for row in rows if row[0] == selected_key)
+        title = f"{dict(CORE_GROUPS)[tag]} - {label}"
+        if core_options(tag, title, output, engine=engine):
+            try:
                 output = working("Cores", "Checking cores", lambda: control("cores"))
                 CORE_RESULTS["all"] = (True, output)
+            except RuntimeError as error:
+                message("Cores", str(error))
+                return
 
 
 def debug() -> None:
@@ -573,13 +772,14 @@ def main_menu() -> bool:
     if status.get("armed") == "1":
         detail = "Hosting" if status.get("role") == "host" else "Joined " + status.get("host", "")
         rows = [("session", "Session status", detail, ""),
-                ("config", "Configuration", "Nickname, cores and settings", ""),
-                ("end", "End session", "Return to normal play", "")]
+                ("end", "End session", "Return to normal play", ""),
+                ("config", "Configuration", "", "")]
     else:
         rows = [("host", "Host", "Start a session", ""),
                 ("join", "Join", "Find someone hosting", ""),
-                ("config", "Configuration", "Nickname, cores and settings", "")]
-    choice = menu("Netplay", rows, back="EXIT", actions={"session": "VIEW", "end": "END SESSION"})
+                ("config", "Configuration", "", "")]
+    choice = menu("Netplay", rows, back="EXIT", pin_last=True,
+                  actions={"session": "VIEW", "end": "END SESSION"})
     if choice is None:
         return False
     key = choice[0]

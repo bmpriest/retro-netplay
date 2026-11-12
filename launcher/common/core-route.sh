@@ -13,11 +13,35 @@
 # then calls np_route_core <requested core path>, np_stage_shim, and
 # np_run_session <rom path> <args...>, whose status it exits with.
 
+# The core the session agreed for a ROM's system (app/engines.c decides; the
+# app writes engine_core.<SYS>=<path> for this device into the session), or
+# nothing: no agreement, or a peer that predates engines, leaves the
+# firmware's own core. The system comes from the ROM's folder: spruce names
+# it Roms/<TAG>, NextUI Roms/<Name> (<TAG>).
+np_engine_core() {
+	[ -n "$NETPLAY_SESSION" ] || return 0
+	case "$1" in */Roms/*) ;; *) return 0 ;; esac
+	_folder=${1#*/Roms/}
+	_folder=${_folder%%/*}
+	_sys=$(printf '%s\n' "$_folder" | sed -n 's/.*(\([^()]*\))[^()]*$/\1/p')
+	[ -n "$_sys" ] || _sys=$_folder
+	case "$_sys" in
+		SMS) _sys=MS ;; THIRTYTWOX) _sys=32X ;; SUPA) _sys=SFC ;; MGBA) _sys=GBA ;;
+	esac
+	_core=$(sed -n "s/^engine_core\.$_sys=//p" "$NETPLAY_SESSION" 2>/dev/null | head -n 1)
+	[ -n "$_core" ] && [ -f "$_core" ] && echo "$_core"
+	return 0
+}
+
 # The shim has to be loaded under the real core's filename. MinArch derives
 # core.name from basename(path) truncated at the last underscore, and core.name
 # feeds config_dir and states_dir; spruce maps the same basename to its save
 # folder. Load it as anything else and the user's save states move. Copying per
 # core name is what keeps those paths identical.
+#
+# An optional second argument is the core to run in place of the requested one
+# (the session's engine, np_engine_core). The shim keeps the requested core's
+# filename; everything decided about the core follows the one that runs.
 np_route_core() {
 	CORE="$1"
 	CORE_NAME="$(basename "$CORE")"
@@ -25,8 +49,10 @@ np_route_core() {
 	# Installed cores remain first choice. The setup app writes a per-core
 	# selection only after both devices compare their installed builds and agree
 	# that the same packaged compatibility build is available locally on each.
-	REAL_CORE="$CORE"
-	CORE_ID="${CORE_NAME%_libretro.so}"
+	RUN_CORE="${2:-$CORE}"
+	REAL_CORE="$RUN_CORE"
+	RUN_NAME="$(basename "$RUN_CORE")"
+	CORE_ID="${RUN_NAME%_libretro.so}"
 	# Word size of the frontend that will load the core. Normally the
 	# platform's own; a 64-bit spruce device that negotiated down for a
 	# 32-bit peer (compat_ra32) runs its 32-bit RetroArch instead, and
@@ -35,7 +61,7 @@ np_route_core() {
 		my282|my285) COMPAT_ARCH=armv7 ;;
 		*)     COMPAT_ARCH=aarch64 ;;
 	esac
-	COMPAT_CORE="$NP/cores/compatibility/$COMPAT_ARCH/$CORE_NAME"
+	COMPAT_CORE="$NP/cores/compatibility/$COMPAT_ARCH/$RUN_NAME"
 	# The A30's stock SFC pak asks for Snes9x 2005. Compatibility negotiation
 	# marks that requested identity, but deliberately routes it to the portable
 	# Supafaust artifact shared with the other platforms under the canonical
@@ -45,7 +71,7 @@ np_route_core() {
 	fi
 	# Packaged cores are per word size too: under compat_ra32 the frontend
 	# loading them is the 32-bit one, so route to the my282 builds.
-	NETPLAY_CORE="$NP/cores/override/${NETPLAY_SHIM_PLATFORM:-$PLATFORM}/$CORE_NAME"
+	NETPLAY_CORE="$NP/cores/override/${NETPLAY_SHIM_PLATFORM:-$PLATFORM}/$RUN_NAME"
 	DUAL_GAMBATTE_CORE="$NP/cores/override/${NETPLAY_SHIM_PLATFORM:-$PLATFORM}/gambatte_dual_libretro.so"
 	DUAL_MGBA_CORE="$NP/cores/override/${NETPLAY_SHIM_PLATFORM:-$PLATFORM}/mgba_dual_libretro.so"
 	CORE_NOTICE=""
@@ -129,7 +155,7 @@ np_route_core() {
 		NETPLAY_COMPAT_CORE=1
 		export NETPLAY_COMPAT_CORE
 		CORE_NOTICE=compatibility
-		echo "[netplay] installed cores differ; using compatibility core for $CORE_NAME" >&2
+		echo "[netplay] installed cores differ; using compatibility core for $RUN_NAME" >&2
 	fi
 
 	# If negotiation found no common fallback (including when the option is
@@ -285,8 +311,8 @@ np_run_session() {
 	if [ -f "$SERIAL_FALLBACK_MARKER" ]; then
 		REASON="$(cat "$SERIAL_FALLBACK_MARKER" 2>/dev/null)"
 		rm -f "$SERIAL_FALLBACK_MARKER"
-		if [ -f "$NETPLAY_CORE" ]; then REAL_CORE="$NETPLAY_CORE"; else REAL_CORE="$CORE"; fi
-		echo "[netplay] instanced link declined (reason=$REASON); relaunching $CORE_NAME on network serial" >&2
+		if [ -f "$NETPLAY_CORE" ]; then REAL_CORE="$NETPLAY_CORE"; else REAL_CORE="$RUN_CORE"; fi
+		echo "[netplay] instanced link declined (reason=$REASON); relaunching $RUN_NAME on network serial" >&2
 		NETPLAY_REAL_CORE="$REAL_CORE"
 		NETPLAY_DUAL_DISABLE=1
 		NETPLAY_CORE_NOTICE=serial-fallback

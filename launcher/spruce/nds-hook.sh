@@ -8,7 +8,11 @@ mounted() { awk -v p="$1" '$5 == p { f=1 } END { exit !f }' /proc/self/mountinfo
 up() {
 	[ -f "$shadow" ] || return 1
 	mkdir -p "$stash"
-	for bin in drastic64 dsperate; do
+	# 4.6.0 calls its AArch64 build drastic; earlier releases used drastic64.
+	if [ -x "$dir/drastic" ] && [ -L "$stash/drastic" ]; then
+		rm -f "$stash/drastic"
+	fi
+	for bin in drastic drastic64 dsperate; do
 		target=$dir/$bin
 		[ -x "$target" ] || continue
 		mounted "$target" && continue
@@ -22,10 +26,12 @@ up() {
 		fi
 	done
 	# The radio hook recognises the basename drastic, not drastic64.
-	[ -e "$stash/drastic" ] || ln -s drastic64 "$stash/drastic"
+	if [ ! -e "$stash/drastic" ] && [ -e "$stash/drastic64" ]; then
+		ln -s drastic64 "$stash/drastic"
+	fi
 }
 down() {
-	for bin in drastic64 dsperate; do
+	for bin in drastic drastic64 dsperate; do
 		target=$dir/$bin
 		mounted "$target" && umount "$target"
 		mounted "$stash/$bin" && umount "$stash/$bin"

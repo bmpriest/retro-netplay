@@ -228,6 +228,62 @@ not the norm.
 Verified on hardware: `gambatte v0.5.0 9b3b5e3` and `picodrive 1.2.3` report
 identically on the A30 and the Brick.
 
+## Session cores (engines)
+
+A session picks one core (an *engine*: a core plus how Netplay drives it) per
+system, the same on both devices, whatever firmware each runs.
+
+- **The table** (`app/engines.c`) lists the engines best first for each
+  system. Each row gives the lowest tier that runs it and whether 32-bit and
+  64-bit builds play each other (measured: [analysis/32-vs-64bit.md](analysis/32-vs-64bit.md)).
+  Tiers: 1 Miyoo Mini family, 2 A30, 3 64-bit devices.
+- **Devices** report which engines they can run, as their firmware finds them.
+  spruce reports RetroArch's cores. NextUI reports its system and pak cores plus
+  Netplay's packaged ones: its own Supafaust, and mGBA Dual only once MGBA.pak
+  is installed (before that it reports mGBA as *installable*).
+- **The host decides.** For each system it takes the first engine both
+  devices have, within the lower tier, that also works across word sizes
+  where it needs to. A 64-bit spruce device paired with a 32-bit one runs
+  32-bit cores (`compat_ra32`), so it counts as 32-bit. The host sends its
+  decision with its manifest. Each device writes `engine.<SYS>=` and, for its
+  own files, `engine_core.<SYS>=` into the session. Launchers on both
+  firmwares load that core in place of the one the game was opened with,
+  while the shim keeps that core's filename.
+- **A peer from before engines** sends no list. Every system then runs each
+  device's own core, as before.
+- The paired cores follow the decision: `instanced_gambatte` and
+  `instanced_mgba` are set from it, as is armGBA's Link Mode (Together,
+  Separate when a Mini plays).
+
+| System | Ladder, best first (lowest tier) |
+|---|---|
+| FC, FDS | FCEUmm |
+| SFC | Supafaust, then Snes9x |
+| MD, SEGACD, 32X | PicoDrive |
+| MS, GG | Genesis Plus GX (3; 64-bit pairs only), Gearsystem, PicoDrive |
+| GB, GBC | Gambatte Dual, then Gambatte link |
+| GBA | armGBA Together (2), armGBA Separate, mGBA Dual (3), gpSP link |
+| PS | PCSX ReARMed (both devices the same word size) |
+| NDS | not in the table: DSperate and DraStic already pair |
+
+**gpSP is the last resort for GBA, and it links only the games it knows**:
+Advance Wars 1 and 2, Pokemon Gen III, and the other Wireless Adapter titles
+in gpSP's own list (`shim/gpsp_games.h`, from the pinned gpSP). Only Advance
+Wars and Pokemon are tested on devices. When a session falls back to gpSP and
+the game is not on the list, the shim shows why instead of playing. If the
+host saw that mGBA Dual would have worked, the message says which device
+should install mGBA (Netplay > Cores).
+
+**Genesis Plus GX and Gearsystem** cannot be checked by comparing whole
+states. Genesis Plus GX writes its Z80 IRQ callback and its YM2612/YM2413
+table pointers into every state, and ASLR moves them in each process.
+Gearsystem's 32-bit build also differs from run to run. For these two cores
+the shim's periodic check hashes system RAM and cartridge RAM instead.
+
+The matrix every known device pair resolves to is generated, not written:
+[engine-matrix.md](engine-matrix.md) (`make test` fails if it is stale). Add a
+device profile to `testing/engines-test.c` when a device or firmware is added.
+
 ## Notes on the awkward cases
 
 **Game Gear is the clearest "so close" entry.** The hardware had Gear-to-Gear,

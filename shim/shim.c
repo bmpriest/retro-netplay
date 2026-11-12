@@ -43,6 +43,7 @@
 #include "libretro.h"
 #include "gambatte_dual.h"
 #include "romscan.h"
+#include "gpsp_games.h"
 #include <zlib.h>
 #include "netlink.h"
 #include "raproto.h"
@@ -672,6 +673,18 @@ static const char* const host_decided_options[] = {
 	"armgba_link_mode", "armgba_link_players", "armgba_link_port",
 	"armgba_gb_link_port", "armgba_gb_link_timing", "armgba_gb_model",
 	"armgba_cpu_clock", "armgba_clock_source", "armgba_clock_speed",
+	"genesis_plus_gx_system_hw", "genesis_plus_gx_region_detect",
+	"genesis_plus_gx_vdp_mode", "genesis_plus_gx_force_dtack",
+	"genesis_plus_gx_addr_error", "genesis_plus_gx_overclock",
+	"genesis_plus_gx_no_sprite_limit", "genesis_plus_gx_enhanced_vscroll",
+	"genesis_plus_gx_enhanced_vscroll_limit", "genesis_plus_gx_ym2413",
+	"genesis_plus_gx_ym2413_core", "genesis_plus_gx_ym2612",
+	"genesis_plus_gx_lock_on", "genesis_plus_gx_add_on", "genesis_plus_gx_cart_size",
+	"genesis_plus_gx_gg_extra", "genesis_plus_gx_cd_latency",
+	"genesis_plus_gx_cart_bram", "genesis_plus_gx_system_bram",
+	"gearsystem_system", "gearsystem_region", "gearsystem_mapper",
+	"gearsystem_timing", "gearsystem_ym2413", "gearsystem_glasses",
+	"gearsystem_up_down_allowed",
 };
 
 static bool option_is_host_decided(const char* key) {
@@ -693,6 +706,9 @@ static const struct { const char* key; const char* value; } builtin_firmware_opt
 	{ "gambatte_gb_bootloader", "disabled" },
 	{ "pcsx_rearmed_bios",      "HLE"      },
 	{ "fceumm_game_genie",      "disabled" },
+	{ "genesis_plus_gx_bios",   "disabled" },
+	{ "gearsystem_bios_sms",    "Disabled" },
+	{ "gearsystem_bios_gg",     "Disabled" },
 };
 
 /* Replaces an existing override rather than adding a second one, which
@@ -2200,7 +2216,9 @@ static bool promote_checkpoint(void) {
 		.core_identity = core_identity_logged(false),
 		.state_size = (uint32_t)checkpoint_candidate_len,
 		.frame = checkpoint_candidate_frame,
-		.state_hash = checkpoint_candidate_hash,
+		/* Of the bytes on disk, which load_checkpoint verifies - not the
+		 * comparison hash, which for some cores covers less (check_hash). */
+		.state_hash = hash_bytes(checkpoint_candidate, checkpoint_candidate_len),
 	};
 	memcpy(h.rom_sha256, rom_sha256, sizeof(h.rom_sha256));
 	const uint8_t* parts[2] = { (const uint8_t*)&h, checkpoint_candidate };
@@ -2305,6 +2323,9 @@ static void offer_state_basis(void) {
  * waits for them before loading its own game. */
 static int host_options_published;
 static char armgba_mismatch[128];
+/* Set when the session's GBA engine is gpSP's link and gpSP cannot link this
+ * game (gpsp_engine_gate): the game shows why instead of playing. */
+static char engine_refusal[200];
 
 static const char* current_option_value(const char* key) {
 	const char* v = find_option_override(key);
@@ -3071,8 +3092,51 @@ static void link_report_pacing(void) {
 }
 
 // Cheap rolling checksum; we only need to notice divergence, not locate it.
+/* Cores whose serialized state holds bytes local to the process, so two
+ * devices in the same emulated state never serialize alike:
+ *   Genesis Plus GX saves its Z80 struct with the IRQ callback pointer in it,
+ *     and its YM2612/YM2413 contexts with their table pointers - ASLR puts
+ *     them somewhere else in every process (two runs of one build on one
+ *     device already differ, corecmp 2026-11-09/10; RAM and video identical).
+ *   Gearsystem's 32-bit build differs run to run the same way (A30,
+ *     2026-11-10); its audio buffers go into the state whole.
+ * For them the periodic check hashes what the game computes - system RAM and
+ * cartridge RAM - instead of the whole state. The state itself still crosses
+ * whole whenever the guest needs it. */
+static int state_check_by_memory = -1;
+
+static bool check_by_memory(void) {
+	if (state_check_by_memory < 0) {
+		struct retro_system_info info;
+		memset(&info, 0, sizeof(info));
+		core.get_system_info(&info);
+		state_check_by_memory = info.library_name &&
+		                        (contains_ci(info.library_name, "genesis plus gx") ||
+		                         contains_ci(info.library_name, "gearsystem"));
+		if (state_check_by_memory)
+			shim_log("%s: state checks compare system and cartridge RAM\n", info.library_name);
+	}
+	return state_check_by_memory;
+}
+
+static uint32_t memory_check_hash(void) {
+	static const unsigned ids[] = { RETRO_MEMORY_SYSTEM_RAM, RETRO_MEMORY_SAVE_RAM };
+	uint32_t h = 2166136261u;
+	for (size_t r = 0; r < sizeof(ids) / sizeof(ids[0]); r++) {
+		size_t n = core.get_memory_size(ids[r]);
+		const uint8_t* p = n ? core.get_memory_data(ids[r]) : NULL;
+		if (!p) n = 0;
+		/* The size goes in too, so a region that one device lacks counts. */
+		for (int b = 0; b < 4; b++) { h ^= (uint8_t)(n >> (8 * b)); h *= 16777619u; }
+		for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= 16777619u; }
+	}
+	return h;
+}
+
 static bool capture_state(void** out, size_t* out_len, uint32_t* out_hash) {
-	return capture_authoritative_state(out, out_len, out_hash);
+	if (!capture_authoritative_state(out, out_len, out_hash)) return false;
+	if (out_hash && check_by_memory()) *out_hash = memory_check_hash();
+	return true;
 }
 
 /* A core takes changed options inside retro_run, so a guest that received the
@@ -5081,12 +5145,13 @@ void retro_run(void) {
 		if (guest_options_service() > 0 && netplay_mode && !dual_link_mode)
 			options_resync_pending = 1;
 	}
-	if (armgba_mismatch[0]) {
+	if (armgba_mismatch[0] || engine_refusal[0]) {
 		/* Nothing this session can do: the two consoles were set up for
-		 * different link modes when the games opened. */
+		 * different link modes when the games opened, or the agreed core
+		 * cannot link this game. */
 		if (fe_input_poll) fe_input_poll();
 		static unsigned mismatch_frames;
-		present_paused_frame(mismatch_frames++, armgba_mismatch);
+		present_paused_frame(mismatch_frames++, armgba_mismatch[0] ? armgba_mismatch : engine_refusal);
 		present_paused_audio();
 		return;
 	}
@@ -5364,8 +5429,83 @@ static bool hash_game_content(const struct retro_game_info* game, uint8_t out[32
 	return true;
 }
 
+/* A line of the session file, "key=value". */
+static bool session_value(const char* key, char* out, size_t cap) {
+	const char* path = getenv(SHIM_ENV_SESSION);
+	FILE* f = path && *path ? fopen(path, "r") : NULL;
+	if (!f) return false;
+	char line[512];
+	size_t kl = strlen(key);
+	bool found = false;
+	while (!found && fgets(line, sizeof(line), f)) {
+		if (strncmp(line, key, kl) || line[kl] != '=') continue;
+		char* v = line + kl + 1;
+		v[strcspn(v, "\r\n")] = '\0';
+		snprintf(out, cap, "%s", v);
+		found = true;
+	}
+	fclose(f);
+	return found;
+}
+
+/* The two devices settled on gpSP's link for GBA (app/engines.c: neither had
+ * a better engine in common), but gpSP links only the games it knows
+ * (gpsp_games.h). Any other game would play solo while both players wait, so
+ * say why instead - and, when the host saw that mGBA would do, where to
+ * install it. */
+static void gpsp_engine_gate(const struct retro_game_info* game) {
+	char engine[32];
+	if (!session_value("engine.GBA", engine, sizeof(engine)) || strcmp(engine, "gpsp-link")) return;
+	struct retro_system_info info;
+	memset(&info, 0, sizeof(info));
+	core.get_system_info(&info);
+	if (!info.library_name || !contains_ci(info.library_name, "gpsp")) return;
+
+	unsigned char header[0xB0];
+	size_t got = 0;
+	if (game && game->data && game->size >= sizeof(header)) {
+		memcpy(header, game->data, sizeof(header));
+		got = sizeof(header);
+	} else if (game && game->path) {
+		const char* ext = strrchr(game->path, '.');
+		if (ext && !strcasecmp(ext, ".zip")) {
+			shim_log("gpSP link: game is still zipped; not checking it\n");
+			return;
+		}
+		FILE* f = fopen(game->path, "rb");
+		if (f) { got = fread(header, 1, sizeof(header), f); fclose(f); }
+	}
+	if (got < sizeof(header)) {
+		shim_log("gpSP link: could not read the cartridge header; not checking it\n");
+		return;
+	}
+	if (gpsp_links_game(header, got)) {
+		shim_log("gpSP link: %.4s is one gpSP links\n", (const char*)header + 0xAC);
+		return;
+	}
+	char hint[48] = "", role[16] = "";
+	session_value("engine_hint.GBA", hint, sizeof(hint));
+	session_value("role", role, sizeof(role));
+	const char* where = NULL;
+	if (!strncmp(hint, "install-mgba:", 13)) {
+		const char* who = hint + 13;
+		bool we_host = !strcmp(role, "host");
+		where = !strcmp(who, "both") ? "both devices"
+		      : (!strcmp(who, "host") == we_host) ? "this device" : "the other device";
+	}
+	if (where)
+		snprintf(engine_refusal, sizeof(engine_refusal),
+		         "gpSP cannot link this game. Install mGBA on %s (Netplay > Cores) to play it together.",
+		         where);
+	else
+		snprintf(engine_refusal, sizeof(engine_refusal),
+		         "gpSP cannot link this game, and these devices have no other GBA core in common.");
+	shim_log("gpSP link: %.4s is not a game gpSP links - %s\n", (const char*)header + 0xAC, engine_refusal);
+}
+
 bool retro_load_game(const struct retro_game_info* game) {
 	ensure_loaded();
+	if (session_active && !ra_mode) gpsp_engine_gate(game);
 	/* RetroArch's content_get_crc(): the CRC-32 of the content's bytes - the
 	 * file, or the archive member, which minarch has already extracted. Only
 	 * a warning in RetroArch when it differs, so best effort. */

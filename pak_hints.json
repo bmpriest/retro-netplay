@@ -16,34 +16,40 @@
     "base": "Systems in NextUI's base install.",
     "extras": "NextUI's extras, plus emulators Netplay installs.",
     "FC": {
+      "available": "Netplay plays FC with the checked core.",
       "ready": "Shared screen: both devices see one console.",
       "present": "This FC.pak uses a core Netplay does not drive.",
       "absent": "No FC.pak on this device."
     },
     "GB": {
-      "ready": "Link cable, a Game Boy each. A: dual instance.",
+      "ready": "Link cable, a Game Boy each.",
+      "available": "Netplay plays GB/GBC with the checked core.",
       "dual": "Dual instance: both Game Boys on each device.",
       "present": "This pak uses a core Netplay does not drive.",
       "absent": "No GB or GBC pak on this device."
     },
     "GBA": {
       "ready": "Link: Wireless Adapter, Pokemon, Advance Wars.",
-    "paired": "gpSP link; games set to mgba play paired mGBA.",
+    "paired": "mGBA Dual: both consoles on each device.",
+      "available": "Netplay plays GBA with the checked core.",
       "present": "This GBA.pak uses a core Netplay does not drive.",
       "absent": "No GBA.pak on this device."
     },
     "MD": {
+      "available": "Netplay plays MD with the checked core.",
       "ready": "Shared screen: both devices see one console.",
       "present": "This MD.pak uses a core Netplay does not drive.",
       "absent": "No MD.pak on this device."
     },
     "PS": {
+      "available": "Netplay plays PS with the checked core.",
       "ready": "Shared screen, experimental.",
       "ready.my282": "Experimental. The A30 cannot pair with others.",
       "present": "This PS.pak uses a core Netplay does not drive.",
       "absent": "No PS.pak on this device."
     },
     "SFC": {
+      "available": "Netplay plays SFC with the checked core.",
       "ready": "Shared screen: both devices see one console.",
       "ready.my282": "Shared screen; pairs with others via Supafaust.",
       "present": "This SFC.pak uses a core Netplay does not drive.",
@@ -66,6 +72,7 @@
       "absent": "Not installed. Add it from NextUI's extras."
     },
     "GG": {
+      "available": "Netplay plays Game Gear with the checked core.",
       "ready": "Shared screen. Gear-to-Gear is not emulated.",
       "present": "This GG.pak uses a core Netplay does not drive.",
       "absent": "Not installed. Add it from NextUI's extras."
@@ -84,6 +91,7 @@
       "unavailable": "DraStic local wireless is not built for this device."
     },
     "SEGACD": {
+      "available": "Netplay plays SegaCD with the checked core.",
       "ready": "Shared screen, untested.",
       "present": "This pak uses a core Netplay does not drive.",
       "absent": "Not installed. Add it from NextUI's extras."
@@ -94,6 +102,7 @@
       "absent": "Not installed. Add it from NextUI's extras."
     },
     "SMS": {
+      "available": "Netplay plays Master System with the checked core.",
       "ready": "Shared screen, untested.",
       "present": "This SMS.pak uses a core Netplay does not drive.",
       "absent": "Not installed. Add it from NextUI's extras."

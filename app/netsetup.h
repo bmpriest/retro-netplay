@@ -8,6 +8,7 @@
 #define NETSETUP_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define NS_MAX_PEERS 8
@@ -255,10 +256,17 @@ void NS_statusIconSync(void);     /* start/stop the icon watcher to match settin
 void NS_quickMenuSync(void);      /* start/stop the START quick menu to match the setting */
 void NS_settingsLoad(void);
 void NS_settingsSave(void);
+void NS_linkOptions(char* text, size_t cap);
+/* The core Netplay runs for a system on this device (app/engines.c's pick for
+ * a session with a device like it); false where the table leaves the system
+ * to the firmware. tag is a firmware tag (GB, MGBA, SMS, ...). */
+bool NS_engineCore(const char* tag, char* core, int len);
+bool NS_setLinkOption(const char* key, const char* value);
 
 /* Is this core present anywhere we would load it from? Used to grey out an
  * instanced-core choice rather than offer something that cannot run. */
 bool NS_coreInstalled(const char* core);
+bool NS_dsperateLanAvailable(const char* path);
 
 /* Emulator paks this pak ships and installs on request, backing up whatever
  * was there (launcher/pak-manage.sh does the file work). */

@@ -122,7 +122,9 @@ if [ ! -f "$SHIM" ]; then
 fi
 
 . "$NP/launcher/core-route.sh"
-np_route_core "$CORE"
+# The session's agreed core for this system, when it differs from the pak's;
+# the shim keeps the pak's core filename.
+np_route_core "$CORE" "$(np_engine_core "$1")"
 np_stage_shim || exec "$REAL_MINARCH" "$CORE" "$@"
 
 # The receiving device has already accepted this game. Sending it back would

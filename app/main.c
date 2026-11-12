@@ -39,8 +39,7 @@ typedef enum {
 	SCREEN_HOST_MENU,
 	SCREEN_CONFIG,
 	SCREEN_NICKNAME,
-	SCREEN_CORES,
-	SCREEN_CORE_LIST,       /* Base or Extras, per cores_extras */
+	SCREEN_CORE_LIST,       /* Systems and their expanded emulator rows */
 	SCREEN_CORE_OPTIONS,    /* Gambatte's or mGBA's, per opt_core */
 	SCREEN_SETTINGS,
 	SCREEN_DEBUG,
@@ -248,21 +247,25 @@ static int wrapped_lines(SDL_Surface* s, const char* text, int max_lines) {
 // something to do or somewhere to go.
 //////////////////////////////////////////////////////////////////////////////
 
-typedef enum { ROW_ACTION, ROW_SUBMENU, ROW_VALUE } RowKind;
+typedef enum { ROW_ACTION, ROW_SUBMENU, ROW_VALUE, ROW_HEADING } RowKind;
 enum { MARK_NONE = 0, MARK_CHECK = 1, MARK_DOUBLE = 2, MARK_CIRCLE = -1, MARK_DASH = -2 };
 
 typedef struct {
 	RowKind     kind;
 	int         id;
 	char        label[64];
+	char        suffix[64];
 	char        value[40];
 	int         mark;
 	bool        more;      /* ">" after the value */
 	bool        dim;
+	bool        small;
+	bool        indent;
+	bool        accordion;
 	const char* hint;
 } Row;
 
-#define MAX_ROWS 16
+#define MAX_ROWS 64
 static Row rows[MAX_ROWS];
 static int row_count;
 
@@ -309,21 +312,32 @@ static void draw_mark(SDL_Surface* s, int mark, int x, int cy, int size, SDL_Col
 	}
 }
 
+static int row_height(const Row* r) {
+	return r->small || r->kind == ROW_HEADING ? SCALE1(PILL_SIZE * 3 / 4) : SCALE1(PILL_SIZE);
+}
+
 static int draw_two_col(SDL_Surface* s, const Row* r, int y, bool selected) {
-	int row_h = SCALE1(PILL_SIZE);
+	int row_h = row_height(r);
 	int pad = SCALE1(BUTTON_PADDING);
 	int x = SCALE1(PADDING);
+	if (r->indent) x += SCALE1(12);
 	int right = s->w - SCALE1(PADDING);
 	int cy = y + row_h / 2;
 	int gap = SCALE1(4);
 	SDL_Color base = r->dim ? COLOR_GRAY : COLOR_WHITE;
+	if (r->kind == ROW_HEADING) {
+		int heading_x = r->small ? x + pad : (s->w - text_w(font.medium, r->label)) / 2;
+		blit_text(s, font.medium, r->label, heading_x, cy, COLOR_GRAY);
+		return y + row_h;
+	}
 
 	/* The right column, measured first: marks, value, ">". */
-	int size = TTF_FontHeight(font.large) * 3 / 5;
+	TTF_Font* value_font = r->small ? font.medium : font.large;
+	int size = TTF_FontHeight(value_font) * 3 / 5;
 	int marks = r->mark == MARK_DOUBLE ? 2 : r->mark ? 1 : 0;
 	int mw = marks ? marks * size + (marks - 1) * gap : 0;
-	int vw = text_w(font.large, r->value);
-	int gw = r->more ? text_w(font.large, ">") : 0;
+	int vw = text_w(value_font, r->value);
+	int gw = r->accordion ? size : r->more ? text_w(value_font, ">") : 0;
 	int group = mw + vw + gw;
 	if (mw && vw) group += gap * 2;
 	if (gw && (mw || vw)) group += gap * 2;
@@ -333,18 +347,19 @@ static int draw_two_col(SDL_Surface* s, const Row* r, int y, bool selected) {
 	bool pill_left = selected && !pill_right;
 
 	/* The label shrinks to the medium font rather than run into the value. */
-	TTF_Font* lf = font.large;
-	int lw = text_w(lf, r->label);
+	TTF_Font* lf = value_font;
+	int lw = text_w(lf, r->label) + text_w(lf, r->suffix);
 	if (x + pad + lw + SCALE1(8) > gx - (pill_right ? pad : 0)) {
 		lf = font.medium;
-		lw = text_w(lf, r->label);
+		lw = text_w(lf, r->label) + text_w(lf, r->suffix);
 	}
 	if (pill_left) {
 		int pw = lw + pad * 2;
 		if (pw > right - x) pw = right - x;
 		GFX_blitPill(ASSET_WHITE_PILL, s, &(SDL_Rect){x, y, pw, row_h});
 	}
-	blit_text(s, lf, r->label, x + pad, cy, pill_left ? COLOR_BLACK : base);
+	int label_width = blit_text(s, lf, r->label, x + pad, cy, pill_left ? COLOR_BLACK : base);
+	if (r->suffix[0]) blit_text(s, lf, r->suffix, x + pad + label_width, cy, COLOR_GRAY);
 
 	if (pill_right)
 		GFX_blitPill(ASSET_WHITE_PILL, s, &(SDL_Rect){gx - pad, y, group + pad * 2, row_h});
@@ -355,8 +370,12 @@ static int draw_two_col(SDL_Surface* s, const Row* r, int y, bool selected) {
 		cx += size + gap;
 	}
 	if (marks) cx += gap - (vw ? 0 : gap);
-	if (vw) cx += blit_text(s, font.large, r->value, cx, cy, rc) + gap * 2;
-	if (gw) blit_text(s, font.large, ">", cx, cy, rc);
+	if (vw) cx += blit_text(s, value_font, r->value, cx, cy, rc) + gap * 2;
+	if (r->accordion) {
+		int t = SCALE1(2);
+		segment(s, cx, cy - size / 4, cx + size / 2, cy + size / 4, t, COLOR_GRAY);
+		segment(s, cx + size / 2, cy + size / 4, cx + size, cy - size / 4, t, COLOR_GRAY);
+	} else if (gw) blit_text(s, value_font, ">", cx, cy, rc);
 	return y + row_h;
 }
 
@@ -366,14 +385,16 @@ static int draw_rows(SDL_Surface* s, int sel, int* top, int y, int footer_lines)
 	/* Down to the top of the button bar, less the footer's lines. */
 	int line_h = TTF_FontHeight(font.small) + SCALE1(4);
 	int bottom = s->h - SCALE1(PADDING + PILL_SIZE) - SCALE1(2) - line_h * footer_lines;
-	int visible = (bottom - y) / SCALE1(PILL_SIZE);
-	if (visible < 1) visible = 1;
-	if (visible > row_count) visible = row_count;
+	if (!row_count) return y;
+	if (*top >= row_count) *top = row_count - 1;
 	if (sel < *top) *top = sel;
-	if (sel >= *top + visible) *top = sel - visible + 1;
-	if (*top > row_count - visible) *top = row_count - visible;
 	if (*top < 0) *top = 0;
-	for (int i = *top; i < *top + visible; i++)
+	if (*top == sel && sel > 0 && rows[sel - 1].kind == ROW_HEADING && !rows[sel - 1].small)
+		(*top)--;
+	int used = 0;
+	for (int i = *top; i <= sel; i++) used += row_height(&rows[i]);
+	while (used > bottom - y && *top < sel) used -= row_height(&rows[(*top)++]);
+	for (int i = *top; i < row_count && (i == *top || y + row_height(&rows[i]) <= bottom); i++)
 		y = draw_two_col(s, &rows[i], y, i == sel);
 	return y;
 }
@@ -394,11 +415,10 @@ static int draw_footer(SDL_Surface* s, int sel, int y);
 enum { MENU_HOST, MENU_JOIN, MENU_CONFIG, MENU_COUNT };
 enum { HOST_ADHOC, HOST_WIFI, HOST_COUNT };
 enum { CONF_NICKNAME, CONF_CORES, CONF_SETTINGS, CONF_DEBUG, CONF_OFF };
-enum { CORES_BASE, CORES_EXTRAS };
 /* "Use simple client" (NS_Settings.simple_client) stays hidden: it was planned
  * but never implemented. The setting is still read and written. */
 enum { SET_QUICK_MENU, SET_STATUS_ICON, SET_COMPAT, SET_GAMESWITCHER, SET_POWERSAVE, SET_ADHOC_SWITCH,
-       SET_HOST_PROTOCOL, SET_HYBRID_NETWORK };
+	   SET_HOST_PROTOCOL, SET_HYBRID_NETWORK };
 enum { DEBUG_FORCE_COMPAT, DEBUG_VERBOSE_LOGS, DEBUG_SAVE_BACKUPS, DEBUG_CHECKS, DEBUG_RESTORE_WIFI };
 enum { OPT_DUAL, OPT_INSTANCED, OPT_REMOVE, OPT_PAIRED_MGBA };
 enum { REM_NETPLAY, REM_DEVICE, REM_BACKUP, REM_CANCEL };
@@ -421,13 +441,11 @@ static int config_sel = 0, config_top = 0;
 static char nickname_edit[NS_NICK_LEN];
 static int nickname_char = 0;
 static const char NICK_CHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -_.";
-static int cores_sel = 0, cores_top = 0;
 static int list_sel = 0, list_top = 0;
 static int settings_sel = 0, settings_top = 0;
 static int debug_sel = 0, debug_top = 0;
 static int opt_sel = 0, opt_top = 0;
 static int remove_sel = 0, remove_top = 0;
-static int menu_top = 0;
 static int prompt_sel = 0;
 static int restore_sel = 0;
 static bool restore_choice[3] = { true, true, true };
@@ -477,88 +495,72 @@ static const struct {
 // where Netplay installs or configures something (">" or a pak to add).
 //////////////////////////////////////////////////////////////////////////////
 
-/* CK_GBA: spruce's GBA row, gpSP's link plus paired mGBA for games set to mgba. */
-typedef enum { CK_SHIM, CK_GAMBATTE, CK_GBA, CK_DSP, CK_MGBA, CK_NDS, CK_SPRUCE_DS } CoreKind;
+typedef enum { CK_SHIM, CK_GAMBATTE, CK_GBA, CK_DSP, CK_MGBA, CK_NDS, CK_SPRUCE_DS, CK_ARMGBA, CK_UNSUPPORTED } CoreKind;
+enum { GROUP_GB, GROUP_GBA, GROUP_GG, GROUP_NDS, GROUP_NES, GROUP_SNES,
+	   GROUP_MD, GROUP_CD32, GROUP_SMS, GROUP_PS, GROUP_COUNT };
+
+static const struct { const char* tag; const char* label; } CORE_GROUPS[] = {
+	{ "GB", "GB/GBC" }, { "GBA", "GBA" }, { "GG", "Game Gear" }, { "NDS", "NDS" },
+	{ "FC", "NES / FC" }, { "SFC", "SNES / SFC" }, { "MD", "Genesis / MegaDrive" },
+	{ "SEGACD", "SegaCD / 32X" }, { "SMS", "Master System" }, { "PS", "PS" },
+};
 
 typedef struct {
-	const char* tag;        /* the pak, and the key into pak_hints.json */
-	const char* tag2;       /* a second pak the row covers (GBC) */
-	const char* label;      /* when the row's name is not the tag */
-	const char* core;       /* the core it names when its pak is absent */
-	CoreKind    kind;
+	const char* tag;
+	const char* label;
+	const char* core;
+	CoreKind kind;
+	int group;
 } CoreDef;
 
-static const CoreDef BASE_CORES[] = {
-	{ "FC",  NULL,  NULL,     "fceumm",       CK_SHIM },
-	{ "GB",  "GBC", "GB/GBC", "gambatte",     CK_GAMBATTE },
+static const CoreDef CORE_DEFS[] = {
+	{ "GB", "Gambatte", "gambatte", CK_GAMBATTE, GROUP_GB },
+	{ "GB", "armGBA", "armgba", CK_ARMGBA, GROUP_GB },
+	{ "GBA", "gpSP", "gpsp", CK_GBA, GROUP_GBA },
 #ifdef NETPLAY_SPRUCE
-	{ "GBA", NULL,  NULL,     "gpsp",         CK_GBA },
+	{ "GBA", "mGBA", "mgba", CK_GBA, GROUP_GBA },
 #else
-	{ "GBA", NULL,  NULL,     "gpsp",         CK_SHIM },
+	{ "MGBA", "mGBA Dual", "mgba", CK_MGBA, GROUP_GBA },
 #endif
-	{ "MD",  NULL,  NULL,     "picodrive",    CK_SHIM },
-	{ "PS",  NULL,  NULL,     "pcsx_rearmed", CK_SHIM },
-	{ "SFC", NULL,  NULL,     "snes9x",       CK_SHIM },
-};
-/* The paks Netplay installs (DSP, MGBA, NDS) and SUPA are NextUI Extras paks;
- * spruce has none of them. */
-static const CoreDef EXTRA_CORES[] = {
-	{ "32X",    NULL, NULL, "picodrive",          CK_SHIM },
-#ifndef NETPLAY_SPRUCE
-	{ "DSP",    NULL, NULL, "dsperate",           CK_DSP },
-#endif
-	{ "FDS",    NULL, NULL, "fceumm",             CK_SHIM },
-	{ "GG",     NULL, NULL, "picodrive",          CK_SHIM },
+	{ "GBA", "armGBA", "armgba", CK_ARMGBA, GROUP_GBA },
+	{ "GG", "PicoDrive", "picodrive", CK_UNSUPPORTED, GROUP_GG },
+	{ "GG", "Genesis Plus GX", "genesis_plus_gx", CK_SHIM, GROUP_GG },
+	{ "GG", "Gearsystem", "gearsystem", CK_SHIM, GROUP_GG },
 #ifdef NETPLAY_SPRUCE
-	{ "NDS",    NULL, "NDS (DraStic)", "drastic", CK_SPRUCE_DS },
-	{ "DSP",    NULL, "NDS (DSperate)", "dsperate", CK_SPRUCE_DS },
+	{ "DSP", "DSperate", "dsperate", CK_SPRUCE_DS, GROUP_NDS },
+	{ "NDS", "DraStic", "drastic", CK_SPRUCE_DS, GROUP_NDS },
+#else
+	{ "DSP", "DSperate", "dsperate", CK_DSP, GROUP_NDS },
+	{ "NDS", "DraStic", "drastic", CK_NDS, GROUP_NDS },
 #endif
-#ifndef NETPLAY_SPRUCE
-	{ "MGBA",   NULL, NULL, "mgba",               CK_MGBA },
-	{ "NDS",    NULL, NULL, "drastic",            CK_NDS },
-#endif
-	{ "SEGACD", NULL, NULL, "picodrive",          CK_SHIM },
-	{ "SG1000", NULL, NULL, "picodrive",          CK_SHIM },
-	{ "SMS",    NULL, NULL, "picodrive",          CK_SHIM },
-#ifndef NETPLAY_SPRUCE
-	{ "SUPA",   NULL, NULL, "mednafen_supafaust", CK_SHIM },
-#endif
+	{ "FC", "FCEUmm", "fceumm", CK_SHIM, GROUP_NES },
+	{ "SFC", "Snes9x", "snes9x", CK_SHIM, GROUP_SNES },
+	{ "SFC", "Snes9x 2005", "snes9x2005", CK_SHIM, GROUP_SNES },
+	{ "SFC", "Supafaust", "mednafen_supafaust", CK_SHIM, GROUP_SNES },
+	{ "SFC", "ChimeraSNES", "chimerasnes", CK_UNSUPPORTED, GROUP_SNES },
+	{ "SFC", "Snes9x 2010", "snes9x2010", CK_UNSUPPORTED, GROUP_SNES },
+	{ "MD", "PicoDrive", "picodrive", CK_SHIM, GROUP_MD },
+	{ "MD", "Genesis Plus GX", "genesis_plus_gx", CK_UNSUPPORTED, GROUP_MD },
+	{ "SEGACD", "PicoDrive", "picodrive", CK_SHIM, GROUP_CD32 },
+	{ "SMS", "PicoDrive", "picodrive", CK_SHIM, GROUP_SMS },
+	{ "SMS", "Genesis Plus GX", "genesis_plus_gx", CK_SHIM, GROUP_SMS },
+	{ "SMS", "Gearsystem", "gearsystem", CK_SHIM, GROUP_SMS },
+	{ "PS", "PCSX ReARMed", "pcsx_rearmed", CK_SHIM, GROUP_PS },
 };
-#define BASE_COUNT  (int)(sizeof(BASE_CORES) / sizeof(BASE_CORES[0]))
-#define EXTRA_COUNT (int)(sizeof(EXTRA_CORES) / sizeof(EXTRA_CORES[0]))
-
-static const char* core_name(const char* core) {
-	static const struct { const char* id; const char* name; } NAMES[] = {
-		{ "fceumm", "FCEUmm" }, { "gambatte", "Gambatte" }, { "gpsp", "gpSP" },
-		{ "picodrive", "PicoDrive" }, { "pcsx_rearmed", "PCSX ReARMed" },
-		{ "snes9x", "Snes9x" }, { "snes9x2005", "Snes9x 2005" },
-		{ "mednafen_supafaust", "Supafaust" },
-		{ "mgba", "mGBA" }, { "dsperate", "DSperate" }, { "drastic", "DraStic" },
-		{ "armgba", "armGBA" },
-	};
-	for (size_t i = 0; i < sizeof(NAMES) / sizeof(NAMES[0]); i++)
-		if (!strcmp(core, NAMES[i].id)) return NAMES[i].name;
-	return core;
-}
+#define CORE_COUNT (int)(sizeof(CORE_DEFS) / sizeof(CORE_DEFS[0]))
 
 typedef struct {
 	int         mark;
 	bool        more;
 	bool        dim;
 	const char* state;      /* pak_hints.json's cores.<tag>.<state> */
-	char        core[32];
 	NS_PakStatus pak;       /* managed paks only */
 	bool        pak_ok;     /* pak status could be read */
 } CoreState;
 
-static bool cores_extras;
-static CoreState core_state[16];
-static bool cores_fresh;    /* core_state matches the card */
-
-static const CoreDef* list_defs(int* n) {
-	*n = cores_extras ? EXTRA_COUNT : BASE_COUNT;
-	return cores_extras ? EXTRA_CORES : BASE_CORES;
-}
+static CoreState core_state[CORE_COUNT];
+static bool cores_fresh;
+static bool core_expanded[GROUP_COUNT];
 
 static bool gambatte_dual(void) {
 	return NS_settings()->inst_core[0] && NS_gambatteDualAvailable();
@@ -587,18 +589,23 @@ static void set_instanced(int core, bool on) {
 
 static void refresh_core(const CoreDef* d, CoreState* st) {
 	memset(st, 0, sizeof(*st));
-	snprintf(st->core, sizeof(st->core), "%s", d->core);
 	switch (d->kind) {
 #ifdef NETPLAY_SPRUCE
 	case CK_SPRUCE_DS: {
-		char path[256];
-		const char* binary = !strcmp(d->core, "drastic") ? "drastic64" : "dsperate";
-		snprintf(path, sizeof(path), "/mnt/SDCARD/Emu/NDS/%s", binary);
+		char path[512];
+		snprintf(path, sizeof(path), "%s/Emu/NDS/%s", NS_sdPath(), d->core);
+		if (!strcmp(d->core, "drastic") && access(path, X_OK) != 0)
+			snprintf(path, sizeof(path), "%s/Emu/NDS/drastic64", NS_sdPath());
 		bool present = access(path, X_OK) == 0;
 		bool radio = true;
 		if (!strcmp(d->core, "drastic")) {
-			snprintf(path, sizeof(path), "/mnt/SDCARD/App/Netplay/bin/%s/libdrastic_wifi.so", PLATFORM);
+			snprintf(path, sizeof(path), "%s/bin/%s/libdrastic_wifi.so", NS_pakPath(), PLATFORM);
 			radio = access(path, R_OK) == 0;
+		} else if (present) {
+			/* The public path may already be covered by our launcher wrapper. */
+			if (access("/tmp/netplay/nds/dsperate", X_OK) == 0)
+				snprintf(path, sizeof(path), "/tmp/netplay/nds/dsperate");
+			radio = NS_dsperateLanAvailable(path);
 		}
 		st->mark = present && radio ? MARK_CHECK : present ? MARK_CIRCLE : MARK_DASH;
 		st->dim = !present;
@@ -608,29 +615,28 @@ static void refresh_core(const CoreDef* d, CoreState* st) {
 #endif
 	case CK_SHIM:
 	case CK_GAMBATTE:
-	case CK_GBA: {
-		char core[32];
-		NS_SystemState sys = NS_systemStatus(d->tag, core, sizeof(core));
-		if (d->tag2 && sys != NS_SYS_READY) {
-			char core2[32];
-			NS_SystemState sys2 = NS_systemStatus(d->tag2, core2, sizeof(core2));
-			if (sys2 > sys) { sys = sys2; snprintf(core, sizeof(core), "%s", core2); }
-		}
-		if (core[0]) snprintf(st->core, sizeof(st->core), "%s", core);
-		if (sys == NS_SYS_READY) {
-			bool dual = d->kind == CK_GAMBATTE && gambatte_dual();
-			bool paired = d->kind == CK_GBA && mgba_paired();
-			st->mark = dual || paired ? MARK_DOUBLE : MARK_CHECK;
-			st->state = dual ? "dual" : paired ? "paired" : "ready";
-		} else if (sys == NS_SYS_PRESENT) {
-			st->mark = MARK_CIRCLE;
-			st->state = "present";
-		} else {
-			st->mark = MARK_DASH;
-			st->dim = true;
-			st->state = "absent";
-		}
-		st->more = (d->kind == CK_GAMBATTE || d->kind == CK_GBA) && sys == NS_SYS_READY;
+	case CK_GBA:
+	case CK_ARMGBA:
+	case CK_UNSUPPORTED: {
+		bool present = NS_coreInstalled(d->core);
+		bool supported = d->kind != CK_UNSUPPORTED;
+		/* Netplay picks one core per system (app/engines.c); the others it
+		 * can drive are only available. The pick runs paired where that is
+		 * its engine (Gambatte Dual, mGBA Dual). */
+		char pick[32];
+		bool table = NS_engineCore(d->tag, pick, sizeof(pick));
+		bool picked = !table || !strcmp(pick, d->core);
+		bool dual = picked && table && d->kind == CK_GAMBATTE && NS_gambatteDualAvailable();
+		bool paired = picked && table && !strcmp(d->core, "mgba") && NS_mgbaDualAvailable();
+		bool works = supported && (strcmp(d->core, "mgba") || paired);
+		st->mark = !present ? MARK_DASH : !works || !picked ? MARK_CIRCLE :
+				   dual || paired ? MARK_DOUBLE : MARK_CHECK;
+		st->dim = !present;
+		st->state = !present ? "absent" : !supported ? "unsupported" : !picked && works ? "available" :
+					dual ? "dual" : paired ? "paired" : works ? "ready" : "present";
+		/* Options left to the player: link settings (armGBA, gpSP). Which
+		 * core, paired or not, and armGBA's Link Mode are Netplay's call. */
+		st->more = present && (d->kind == CK_ARMGBA || (d->kind == CK_GBA && !strcmp(d->core, "gpsp")));
 		break;
 	}
 	case CK_DSP:
@@ -669,62 +675,126 @@ static void refresh_core(const CoreDef* d, CoreState* st) {
 /* Reading every pak's status costs a few hashes and launch.sh reads, so it is
  * done on entering the list and after a change, never per frame. */
 static void refresh_cores(void) {
-	int n;
-	const CoreDef* defs = list_defs(&n);
-	for (int i = 0; i < n; i++) refresh_core(&defs[i], &core_state[i]);
+	for (int i = 0; i < CORE_COUNT; i++) refresh_core(&CORE_DEFS[i], &core_state[i]);
 	cores_fresh = true;
 }
 
-static void open_core_list(bool extras) {
-	cores_extras = extras;
-	list_sel = list_top = 0;
+static void open_core_list(void) {
+	list_sel = 1;
+	list_top = 0;
 	status[0] = '\0';
 	refresh_cores();
 	screen = SCREEN_CORE_LIST;
 }
 
+static bool core_visible(int i) {
+#ifdef NETPLAY_SPRUCE
+	return strcmp(core_state[i].state, "absent") && strcmp(core_state[i].state, "unavailable");
+#else
+	return CORE_DEFS[i].kind == CK_MGBA || CORE_DEFS[i].kind == CK_DSP ||
+		   CORE_DEFS[i].kind == CK_NDS || strcmp(core_state[i].state, "absent");
+#endif
+}
+
 static void build_core_rows(void) {
-	int n;
-	const CoreDef* defs = list_defs(&n);
 	if (!cores_fresh) refresh_cores();
 	row_count = 0;
-	for (int i = 0; i < n; i++) {
-		const CoreDef* d = &defs[i];
-		const CoreState* st = &core_state[i];
-		char label[64];
-		snprintf(label, sizeof(label), "%s (%s)", d->label ? d->label : d->tag, core_name(st->core));
-		Row* r = add_row(ROW_VALUE, i, label, HINT_getf("cores.%s.%s", d->tag, st->state));
-		r->mark = st->mark;
-		r->more = st->more;
-		r->dim = st->dim;
+	for (int group = 0; group < GROUP_COUNT; group++) {
+		if (group == GROUP_GB || group == GROUP_NES)
+			add_row(ROW_HEADING, -100, group == GROUP_GB ? "Link Play" : "Shared Screen", "");
+		int count = 0, only = -1;
+		for (int i = 0; i < CORE_COUNT; i++) {
+			if (CORE_DEFS[i].group != group || !core_visible(i)) continue;
+			count++;
+			only = i;
+		}
+		Row* parent = add_row(ROW_ACTION, -group - 1, CORE_GROUPS[group].label, "");
+		parent->accordion = count > 1;
+		parent->dim = count == 0;
+		if (count == 1) {
+			parent->id = only;
+			snprintf(parent->suffix, sizeof(parent->suffix), " (%s)", CORE_DEFS[only].label);
+			parent->mark = core_state[only].mark;
+			parent->more = core_state[only].more;
+			parent->hint = HINT_getf("cores.%s.%s", CORE_DEFS[only].tag, core_state[only].state);
+			continue;
+		}
+		if (count == 0) continue;
+		if (!core_expanded[group]) continue;
+		for (int i = 0; i < CORE_COUNT; i++) {
+			if (CORE_DEFS[i].group != group || !core_visible(i)) continue;
+			const CoreState* st = &core_state[i];
+			Row* r = add_row(st->more ? ROW_SUBMENU : ROW_ACTION, i,
+							 CORE_DEFS[i].label, HINT_getf("cores.%s.%s", CORE_DEFS[i].tag, st->state));
+			r->small = true;
+			r->indent = true;
+			r->mark = st->mark;
+			r->dim = st->dim;
+			if (CORE_DEFS[i].kind == CK_UNSUPPORTED)
+				r->hint = group == GROUP_GG ? "Gear-to-Gear link is not implemented by this core."
+										   : "This core is installed. Netplay does not support it.";
+		}
 	}
 }
 
-/* Gambatte's and mGBA's own screen. */
+/* Options for the emulator selected inside a system accordion. */
 static CoreKind opt_core = CK_GAMBATTE;
+static int opt_engine;
+
+typedef struct {
+	const char* key;
+	const char* label;
+	const char* values[6];
+	const char* labels[6];
+	int count;
+	int systems; /* 1: GB/GBC, 2: GBA, 4: gpSP */
+} CoreOption;
+
+static const CoreOption LINK_OPTIONS[] = {
+	{ "gpsp_serial", "Link Type", { "auto", "rfu", "mul_poke", "mul_aw1", "mul_aw2" },
+	  { "Automatic", "Wireless Adapter", "Cable: Pokemon Gen III", "Cable: Advance Wars 1", "Cable: Advance Wars 2" }, 5, 4 },
+	{ "armgba_link_players", "Number of Players", { "2", "3", "4" }, { "2", "3", "4" }, 3, 3 },
+	{ "armgba_gb_link_port", "Link Port", { "cable", "adapter" }, { "Link Cable", "Four Player Adapter" }, 2, 1 },
+	{ "armgba_gb_link_timing", "Link Timing", { "standard", "exact" }, { "Standard", "Exact" }, 2, 1 },
+	{ "armgba_gb_model", "Game Boy Model", { "Auto", "Game Boy", "Game Boy Pocket", "Game Boy Color", "Game Boy Advance" },
+	  { "Auto", "Game Boy", "Game Boy Pocket", "Game Boy Color", "Game Boy Advance" }, 5, 1 },
+	{ "armgba_link_port", "Link Port", { "cable", "wireless" }, { "Link Cable", "Wireless Adapter" }, 2, 2 },
+};
+#define LINK_OPTION_COUNT (int)(sizeof(LINK_OPTIONS) / sizeof(LINK_OPTIONS[0]))
+#define OPT_LINK_BASE 100
+
+static int link_option_index(const CoreOption* option) {
+	char options[1024], key[96];
+	NS_linkOptions(options, sizeof(options));
+	snprintf(key, sizeof(key), "%s=", option->key);
+	const char* value = strstr(options, key);
+	if (!value) return 0;
+	value += strlen(key);
+	size_t length = strcspn(value, "\n");
+	for (int i = 0; i < option->count; i++)
+		if (strlen(option->values[i]) == length && !strncmp(value, option->values[i], length)) return i;
+	return 0;
+}
 
 static void build_option_rows(void) {
 	row_count = 0;
-	if (opt_core == CK_GAMBATTE) {
-		bool avail = NS_gambatteDualAvailable();
-		bool on = gambatte_dual();
-		Row* r = add_row(ROW_VALUE, OPT_DUAL, "Dual instance",
-		                 HINT_get(!avail ? "gambatte.dual.unavailable" : on ? "gambatte.dual.on" : "gambatte.dual.off"));
-		snprintf(r->value, sizeof(r->value), "%s", !avail ? "Unavailable" : on ? "On" : "Off");
-		r->dim = !avail;
-	} else if (opt_core == CK_GBA) {
-		bool avail = NS_mgbaDualAvailable();
-		bool on = mgba_paired();
-		Row* r = add_row(ROW_VALUE, OPT_PAIRED_MGBA, "Paired mGBA",
-		                 HINT_get(!avail ? "gba.paired.unavailable" : on ? "gba.paired.on" : "gba.paired.off"));
-		snprintf(r->value, sizeof(r->value), "%s", !avail ? "Unavailable" : on ? "On" : "Off");
-		r->dim = !avail;
-	} else {
-		bool on = mgba_instanced() && pak_status.managed && pak_status.installed && !pak_status.missing;
+	const CoreDef* engine = &CORE_DEFS[opt_engine];
+	if (opt_core == CK_ARMGBA || (opt_core == CK_GBA && !strcmp(engine->core, "gpsp"))) {
+		int mask = opt_core == CK_GBA ? 4 : engine->group == GROUP_GB ? 1 : 2;
+		for (int i = 0; i < LINK_OPTION_COUNT; i++) {
+			const CoreOption* option = &LINK_OPTIONS[i];
+			if (!(option->systems & mask)) continue;
+			Row* row = add_row(ROW_VALUE, OPT_LINK_BASE + i, option->label,
+							  "Changes apply to the next session. A, Left or Right to change.");
+			snprintf(row->value, sizeof(row->value), "< %s >", option->labels[link_option_index(option)]);
+		}
+	} else if (opt_core == CK_MGBA) {
+		/* MGBA.pak itself: with it installed, sessions with another device
+		 * that has it run mGBA Dual for GBA (app/engines.c). */
 		bool ready = pak_status.managed && pak_status.installed && !pak_status.missing;
-		Row* r = add_row(ROW_VALUE, OPT_INSTANCED, "Instanced link",
-		                 HINT_get(on ? "mgba.instanced.on" : ready ? "mgba.instanced.off" : "mgba.instanced.install"));
-		snprintf(r->value, sizeof(r->value), "%s", on ? "On" : "Off");
+		if (!ready || pak_status.mismatch)
+			add_row(ROW_ACTION, OPT_INSTANCED, ready ? "Reinstall MGBA.pak" : "Install MGBA.pak",
+			        HINT_get("mgba.instanced.install"));
 		if (pak_status.managed)
 			add_row(ROW_ACTION, OPT_REMOVE, "Remove MGBA.pak", HINT_get("mgba.remove"));
 	}
@@ -756,12 +826,6 @@ static void build_config_rows(void) {
 	add_row(ROW_SUBMENU, CONF_SETTINGS, "Settings", HINT_get("config.settings"));
 	add_row(ROW_SUBMENU, CONF_DEBUG, "Debug", HINT_get("config.debug"));
 	add_row(ROW_ACTION, CONF_OFF, "Turn Off Netplay", HINT_get("config.off"));
-}
-
-static void build_cores_rows(void) {
-	row_count = 0;
-	add_row(ROW_SUBMENU, CORES_BASE, "Base", HINT_get("cores.base"));
-	add_row(ROW_SUBMENU, CORES_EXTRAS, "Extras", HINT_get("cores.extras"));
 }
 
 static const char* on_off(bool on) { return on ? "On" : "Off"; }
@@ -857,7 +921,6 @@ static void build_rows(void) {
 	switch (screen) {
 	case SCREEN_MENU:         build_menu_rows(); break;
 	case SCREEN_CONFIG:       build_config_rows(); break;
-	case SCREEN_CORES:        build_cores_rows(); break;
 	case SCREEN_CORE_LIST:    build_core_rows(); break;
 	case SCREEN_CORE_OPTIONS: build_option_rows(); break;
 	case SCREEN_SETTINGS:     build_settings_rows(); break;
@@ -1301,6 +1364,7 @@ static void render(SDL_Surface* s) {
 	case SCREEN_MENU: {
 		NS_SessionInfo session;
 		bool armed = NS_sessionInfo(&session);
+		int config_y = s->h - SCALE1(PADDING + PILL_SIZE * 2);
 		draw_title(s, quick_mode
 		           ? (armed ? "Netplay Quick - armed" : "Netplay Quick")
 		           : (armed ? "Netplay - armed" : "Netplay"));
@@ -1335,18 +1399,17 @@ static void render(SDL_Surface* s) {
 			}
 			Row conf = { .kind = ROW_ACTION };
 			snprintf(conf.label, sizeof(conf.label), "Configuration");
-			y = draw_two_col(s, &conf, y + SCALE1(8), true);
 			y = draw_wifi_line(s, y + SCALE1(8));
 			if (status[0]) draw_line(s, status, y, COLOR_GRAY, true);
+			draw_two_col(s, &conf, config_y, true);
 		} else {
-			/* Three rows, then one line - a status message, or the hint when
-			 * there is none - and the WiFi line: on 640x480 there is room for
-			 * no more, and Configuration must not scroll out of sight. */
-			y = draw_rows(s, menu_sel, &menu_top, y, 2);
+			y = draw_two_col(s, &rows[MENU_HOST], y, menu_sel == MENU_HOST);
+			y = draw_two_col(s, &rows[MENU_JOIN], y, menu_sel == MENU_JOIN);
 			y += SCALE1(2);
 			if (status[0]) y = draw_wrapped(s, status, y, COLOR_GRAY, 1);
 			else if (rows[menu_sel].hint[0]) y = draw_wrapped(s, rows[menu_sel].hint, y, COLOR_GRAY, 1);
 			draw_wifi_line(s, y + SCALE1(2));
+			draw_two_col(s, &rows[MENU_CONFIG], config_y, menu_sel == MENU_CONFIG);
 		}
 		GFX_blitButtonGroup(armed
 		                    ? (char*[]){"B", "EXIT", "X", "END SESSION", "A", "SELECT", NULL}
@@ -1370,7 +1433,6 @@ static void render(SDL_Surface* s) {
 		break;
 	}
 	case SCREEN_CONFIG:
-	case SCREEN_CORES:
 	case SCREEN_CORE_LIST:
 	case SCREEN_CORE_OPTIONS:
 	case SCREEN_SETTINGS:
@@ -1380,10 +1442,12 @@ static void render(SDL_Surface* s) {
 		bool values = false;
 		switch (screen) {
 		case SCREEN_CONFIG:   sel = &config_sel; top = &config_top; title = "Configuration"; break;
-		case SCREEN_CORES:    sel = &cores_sel; top = &cores_top; title = "Cores"; break;
-		case SCREEN_CORE_LIST: sel = &list_sel; top = &list_top; title = cores_extras ? "Extras" : "Base"; break;
+		case SCREEN_CORE_LIST: sel = &list_sel; top = &list_top; title = "Cores"; break;
 		case SCREEN_CORE_OPTIONS:
-			sel = &opt_sel; top = &opt_top; title = opt_core == CK_GAMBATTE ? "Gambatte" : "mGBA";
+			sel = &opt_sel; top = &opt_top;
+			snprintf(buf, sizeof(buf), "%s - %s",
+			         CORE_GROUPS[CORE_DEFS[opt_engine].group].label, CORE_DEFS[opt_engine].label);
+			title = buf;
 			values = true;
 			break;
 		case SCREEN_SETTINGS: sel = &settings_sel; top = &settings_top; title = "Settings"; values = true; break;
@@ -1822,36 +1886,21 @@ static void change_setting(int id, int dir) {
 	NS_settingsSave();
 }
 
-static void change_option(int id) {
+static void change_option(int id, int direction) {
+	if (id >= OPT_LINK_BASE && id < OPT_LINK_BASE + LINK_OPTION_COUNT) {
+		const CoreOption* option = &LINK_OPTIONS[id - OPT_LINK_BASE];
+		int index = (link_option_index(option) + direction + option->count) % option->count;
+		if (!NS_setLinkOption(option->key, option->values[index]))
+			snprintf(status, sizeof(status), "Could not save core option.");
+		else status[0] = '\0';
+		return;
+	}
 	status[0] = '\0';
-	if (id == OPT_DUAL) {
-		if (!NS_gambatteDualAvailable()) {
-			snprintf(status, sizeof(status), "Dual instance is not built for this device.");
-			return;
-		}
-		set_instanced(0, !gambatte_dual());
-		cores_fresh = false;
-	} else if (id == OPT_PAIRED_MGBA) {
-		if (!NS_mgbaDualAvailable()) {
-			snprintf(status, sizeof(status), "Paired mGBA is not built for this device.");
-			return;
-		}
-		set_instanced(1, !mgba_paired());
-		cores_fresh = false;
-	} else if (id == OPT_INSTANCED) {
-		bool ready = pak_status.managed && pak_status.installed && !pak_status.missing;
-		if (mgba_instanced() && ready) {
-			set_instanced(1, false);
-		} else if (ready && !pak_status.mismatch) {
-			set_instanced(1, true);
-		} else {
-			pak_kind = NS_PAK_MGBA;
-			pak_return = SCREEN_CORE_OPTIONS;
-			prompt_sel = 0;
-			screen = SCREEN_PAK_INSTALL;
-			return;
-		}
-		cores_fresh = false;
+	if (id == OPT_INSTANCED) {
+		pak_kind = NS_PAK_MGBA;
+		pak_return = SCREEN_CORE_OPTIONS;
+		prompt_sel = 0;
+		screen = SCREEN_PAK_INSTALL;
 	}
 }
 
@@ -2209,7 +2258,7 @@ static int ctl_main(int argc, char* argv[]) {
 	NS_init();
 	/* Core inspection is safe to warm in the background while PyUI starts.
 	 * It only reads spruce's emulator choices and needs no network recovery. */
-	if (strcmp(cmd, "cores")) {
+	if (strcmp(cmd, "cores") && strcmp(cmd, "core-option")) {
 		NS_cleanupStaleSession();
 		NS_wifiRecoverIfStranded();
 		if (!NS_localIP(local_ip, sizeof(local_ip))) snprintf(local_ip, sizeof(local_ip), "no network");
@@ -2249,22 +2298,25 @@ static int ctl_main(int argc, char* argv[]) {
 			snprintf(status, sizeof(status), "cores base|extras");
 			return ctl_result(false);
 		}
-		for (int extras = 0; extras < 2; extras++) {
-			if (arg[0] && strcmp(arg, extras ? "extras" : "base")) continue;
-			cores_extras = extras;
-			int n;
-			const CoreDef* defs = list_defs(&n);
-			for (int i = 0; i < n; i++) {
-				CoreState st;
-				refresh_core(&defs[i], &st);
-				printf("core\t%s\t%s\t%s\t%s\t%d\n", extras ? "extras" : "base",
-				       defs[i].tag, defs[i].label ? defs[i].label : defs[i].tag,
-				       st.state ? st.state : "unknown", st.more ? 1 : 0);
-				printf("core_hint\t%s\t%s\n", defs[i].tag, core_name(st.core));
-			}
+		refresh_cores();
+		for (int i = 0; i < CORE_COUNT; i++) {
+			const CoreDef* d = &CORE_DEFS[i];
+			const CoreState* st = &core_state[i];
+			printf("core_engine\t%s\t%s\t%s\t%s\t%d\n",
+				   CORE_GROUPS[d->group].tag, d->core, d->label, st->state, st->more);
 		}
 		printf("gambatte_dual=%d\nmgba_dual=%d\n", NS_gambatteDualAvailable(), NS_mgbaDualAvailable());
+		printf("inst_gambatte=%d\ninst_mgba=%d\n", gambatte_dual(), mgba_paired());
+		char options[1024];
+		NS_linkOptions(options, sizeof(options));
+		fputs(options, stdout);
 		return 0;
+	}
+
+	if (!strcmp(cmd, "core-option")) {
+		if (argc == 3 && NS_setLinkOption(arg, argv[2])) return ctl_result(true);
+		snprintf(status, sizeof(status), "Could not save core option");
+		return ctl_result(false);
 	}
 
 	if (!strcmp(cmd, "peers")) {
@@ -2847,7 +2899,7 @@ int main(int argc, char* argv[]) {
 					nickname_char = 0;
 					screen = SCREEN_NICKNAME;
 					break;
-				case CONF_CORES:    cores_sel = 0; screen = SCREEN_CORES; break;
+				case CONF_CORES:    open_core_list(); break;
 				case CONF_SETTINGS: settings_sel = 0; screen = SCREEN_SETTINGS; break;
 				case CONF_DEBUG:    debug_sel = 0; screen = SCREEN_DEBUG; break;
 				case CONF_OFF:      turn_off_from(NS_PAK_MGBA); break;
@@ -2884,29 +2936,70 @@ int main(int argc, char* argv[]) {
 			break;
 		}
 
-		case SCREEN_CORES:
-			if (step_sel(&cores_sel, row_count)) dirty = 1;
-			if (PAD_justPressed(BTN_B)) { status[0] = '\0'; screen = SCREEN_CONFIG; dirty = 1; }
-			if (PAD_justPressed(BTN_A)) {
-				open_core_list(rows[cores_sel].id == CORES_EXTRAS);
+		case SCREEN_CORE_LIST: {
+			if (step_sel(&list_sel, row_count)) {
+				while (rows[list_sel].kind == ROW_HEADING) step_sel(&list_sel, row_count);
 				dirty = 1;
 			}
-			break;
-
-		case SCREEN_CORE_LIST: {
-			if (step_sel(&list_sel, row_count)) dirty = 1;
-			if (PAD_justPressed(BTN_B)) { status[0] = '\0'; screen = SCREEN_CORES; dirty = 1; }
-			if (PAD_justPressed(BTN_A) && list_sel < row_count) {
-				int n;
-				const CoreDef* d = &list_defs(&n)[rows[list_sel].id];
-				const CoreState* st = &core_state[rows[list_sel].id];
+			if (PAD_justPressed(BTN_B)) {
+				bool expanded = false;
+				for (int i = 0; i < GROUP_COUNT; i++) {
+					expanded |= core_expanded[i];
+					core_expanded[i] = false;
+				}
+				status[0] = '\0';
+				if (!expanded) screen = SCREEN_CONFIG;
+				else {
+					int id = rows[list_sel].id;
+					int group = id < 0 ? -id - 1 : CORE_DEFS[id].group;
+					build_core_rows();
+					for (int i = 0; i < row_count; i++)
+						if (rows[i].id == -group - 1 ||
+						    (rows[i].id >= 0 && !rows[i].small && CORE_DEFS[rows[i].id].group == group))
+							list_sel = i;
+				}
+				dirty = 1;
+				break;
+			}
+			int direction = lr_step();
+			if ((PAD_justPressed(BTN_A) || direction) && list_sel < row_count) {
+				int id = rows[list_sel].id;
+				if (direction < 0 && id >= 0) {
+					int group = CORE_DEFS[id].group;
+					core_expanded[group] = false;
+					build_core_rows();
+					for (int i = 0; i < row_count; i++)
+						if (rows[i].id == -group - 1 ||
+						    (rows[i].id >= 0 && !rows[i].small && CORE_DEFS[rows[i].id].group == group))
+							list_sel = i;
+					dirty = 1;
+					break;
+				}
+				if (id < 0) {
+					int group = -id - 1;
+					if (group < GROUP_COUNT)
+						core_expanded[group] = direction ? direction > 0 : !core_expanded[group];
+					dirty = 1;
+					break;
+				}
+				const CoreDef* d = &CORE_DEFS[id];
+				const CoreState* st = &core_state[id];
 				status[0] = '\0';
 				switch (d->kind) {
 				case CK_SHIM:
+				case CK_UNSUPPORTED:
+				case CK_SPRUCE_DS:
 					break;   /* status only */
 				case CK_GAMBATTE:
+				case CK_ARMGBA:
 				case CK_GBA:
-					if (st->more) { opt_core = d->kind; opt_sel = 0; screen = SCREEN_CORE_OPTIONS; }
+					if (st->more) {
+						opt_core = d->kind;
+						opt_engine = id;
+						opt_sel = 0;
+						opt_top = 0;
+						screen = SCREEN_CORE_OPTIONS;
+					}
 					break;
 				case CK_MGBA:
 					if (!strcmp(st->state, "unavailable")) break;
@@ -2916,6 +3009,7 @@ int main(int argc, char* argv[]) {
 					}
 					pak_status = st->pak;
 					opt_core = CK_MGBA;
+					opt_engine = id;
 					opt_sel = 0;
 					screen = SCREEN_CORE_OPTIONS;
 					break;
@@ -2931,12 +3025,16 @@ int main(int argc, char* argv[]) {
 		}
 
 		case SCREEN_CORE_OPTIONS: {
-			if (step_sel(&opt_sel, row_count)) dirty = 1;
+			if (step_sel(&opt_sel, row_count)) {
+				if (rows[opt_sel].kind == ROW_HEADING) step_sel(&opt_sel, row_count);
+				dirty = 1;
+			}
 			if (PAD_justPressed(BTN_B)) { status[0] = '\0'; screen = SCREEN_CORE_LIST; dirty = 1; }
 			if (opt_sel >= row_count) break;
 			int id = rows[opt_sel].id;
-			if (rows[opt_sel].kind == ROW_VALUE && (lr_step() || PAD_justPressed(BTN_A))) {
-				change_option(id);
+			int direction = lr_step();
+			if (rows[opt_sel].kind == ROW_VALUE && (direction || PAD_justPressed(BTN_A))) {
+				change_option(id, direction ? direction : 1);
 				dirty = 1;
 			} else if (id == OPT_REMOVE && PAD_justPressed(BTN_A)) {
 				pak_kind = NS_PAK_MGBA;

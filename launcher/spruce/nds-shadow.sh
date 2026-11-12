@@ -1,5 +1,5 @@
 #!/bin/sh
-# Entered in place of spruce's drastic64 or dsperate, after its stock setup.
+# Entered in place of spruce's drastic, drastic64 or dsperate after stock setup.
 . /mnt/SDCARD/App/Netplay/launcher/firmware.sh
 NP=$NETPLAY_PAK
 bin=$(basename "$0")
@@ -51,7 +51,7 @@ np_nds_run() {
 	exit 1
 }
 
-if [ "$bin" = drastic64 ]; then
+if [ "$bin" = drastic ] || [ "$bin" = drastic64 ]; then
 	radio=$NP/bin/$PLATFORM/libdrastic_wifi.so
 	[ -f "$radio" ] || exec "$real" "$@"
 	if [ "$role" = host ]; then DRASTIC_WIFI_LAN=host; else DRASTIC_WIFI_LAN=join:$peer; fi
