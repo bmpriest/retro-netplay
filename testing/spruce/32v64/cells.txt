@@ -1,0 +1,56 @@
+# Main pass: run as is (sh bin/batch.sh bin/cells.txt). NAME|CORE|ROM|OPT|EXTRA
+fceumm-mm2|fceumm_libretro.so|FC/Mega Man 2 (USA).nes|FCEUmm/FCEUmm.opt|
+fceumm-smb3|fceumm_libretro.so|FC/Super Mario Bros. 3 (USA) (Rev 1).nes|FCEUmm/FCEUmm.opt|
+fceumm-squatch|fceumm_libretro.so|FC/Squatch Quest (Demo).nes|FCEUmm/FCEUmm.opt|
+nestopia-mm2|nestopia_libretro.so|FC/Mega Man 2 (USA).nes|Nestopia/Nestopia.opt|
+nestopia-smb3|nestopia_libretro.so|FC/Super Mario Bros. 3 (USA) (Rev 1).nes|Nestopia/Nestopia.opt|
+quicknes-mm2|quicknes_libretro.so|FC/Mega Man 2 (USA).nes|-|
+quicknes-smb3|quicknes_libretro.so|FC/Super Mario Bros. 3 (USA) (Rev 1).nes|-|
+gambatte-tetris|gambatte_libretro.so|GB/Tetris (World) (Rev 1).gb|Gambatte/GB.opt|
+gambatte-red|gambatte_libretro.so|GB/Pokemon - Red Version (USA, Europe) (SGB Enhanced).gb|Gambatte/GB.opt|
+gambatte-crystal|gambatte_libretro.so|GBC/Pokemon - Crystal Version (USA, Europe) (Rev 1).gbc|Gambatte/GBC.opt|
+gambatte-shantae|gambatte_libretro.so|GBC/Shantae (USA).gbc|Gambatte/GBC.opt|
+gearboy-tetris|gearboy_libretro.so|GB/Tetris (World) (Rev 1).gb|-|
+gearboy-crystal|gearboy_libretro.so|GBC/Pokemon - Crystal Version (USA, Europe) (Rev 1).gbc|-|
+mgba-tetris|mgba_libretro.so|GB/Tetris (World) (Rev 1).gb|mGBA/mGBA.opt|
+mgba-crystal|mgba_libretro.so|GBC/Pokemon - Crystal Version (USA, Europe) (Rev 1).gbc|mGBA/mGBA.opt|
+mgba-mksc|mgba_libretro.so|GBA/Mario Kart - Super Circuit (USA).gba|mGBA/mGBA.opt|
+mgba-emerald|mgba_libretro.so|GBA/Pokemon - Emerald Version (USA, Europe).gba|mGBA/mGBA.opt|
+gpsp-mksc|gpsp_libretro.so|GBA/Mario Kart - Super Circuit (USA).gba|gpSP/gpSP.opt|
+gpsp-emerald|gpsp_libretro.so|GBA/Pokemon - Emerald Version (USA, Europe).gba|gpSP/gpSP.opt|
+gpsp-aw2|gpsp_libretro.so|GBA/Advance Wars 2 - Black Hole Rising (USA).gba|gpSP/gpSP.opt|
+armgba-mksc|armgba_libretro.so|GBA/Mario Kart - Super Circuit (USA).gba|armGBA/armGBA.opt|
+armgba-emerald|armgba_libretro.so|GBA/Pokemon - Emerald Version (USA, Europe).gba|armGBA/armGBA.opt|
+pokedaisy-emerald|pokedaisy_libretro.so|GBA/Pokemon - Emerald Version (USA, Europe).gba|PokeDaisy/PokeDaisy.opt|
+gpgx-sor2|genesis_plus_gx_libretro.so|MD/Streets of Rage 2 (USA).md|Genesis Plus GX/Genesis Plus GX.opt|
+gpgx-gunstar|genesis_plus_gx_libretro.so|MD/Gunstar Heroes (USA).md|Genesis Plus GX/Genesis Plus GX.opt|
+gpgx-sonicchaos|genesis_plus_gx_libretro.so|GG/Sonic Chaos (USA, Europe, Brazil).gg|Genesis Plus GX/Genesis Plus GX.opt|
+picodrive-sor2|picodrive_libretro.so|MD/Streets of Rage 2 (USA).md|PicoDrive/PicoDrive.opt|
+picodrive-gunstar|picodrive_libretro.so|MD/Gunstar Heroes (USA).md|PicoDrive/PicoDrive.opt|
+picodrive-sonicchaos|picodrive_libretro.so|GG/Sonic Chaos (USA, Europe, Brazil).gg|PicoDrive/PicoDrive.opt|
+gearsystem-sonicchaos|gearsystem_libretro.so|GG/Sonic Chaos (USA, Europe, Brazil).gg|Gearsystem/Gearsystem.opt|
+snes9x-smk|snes9x_libretro.so|SFC/Super Mario Kart (USA).sfc|Snes9x/Snes9x.opt|
+snes9x-contra3|snes9x_libretro.so|SFC/Contra III - The Alien Wars (USA).sfc|Snes9x/Snes9x.opt|
+snes9x-starfox|snes9x_libretro.so|SFC/Star Fox (USA) (Rev 2).sfc|Snes9x/Snes9x.opt|
+supafaust-smk|mednafen_supafaust_libretro.so|SFC/Super Mario Kart (USA).sfc|Supafaust/Supafaust.opt|
+supafaust-contra3|mednafen_supafaust_libretro.so|SFC/Contra III - The Alien Wars (USA).sfc|Supafaust/Supafaust.opt|
+supafaust-starfox|mednafen_supafaust_libretro.so|SFC/Star Fox (USA) (Rev 2).sfc|Supafaust/Supafaust.opt|
+chimera-smk|chimerasnes_libretro.so|SFC/Super Mario Kart (USA).sfc|ChimeraSNES/ChimeraSNES.opt|
+chimera-contra3|chimerasnes_libretro.so|SFC/Contra III - The Alien Wars (USA).sfc|ChimeraSNES/ChimeraSNES.opt|
+chimera-starfox|chimerasnes_libretro.so|SFC/Star Fox (USA) (Rev 2).sfc|ChimeraSNES/ChimeraSNES.opt|
+pcsx-ctr|pcsx_rearmed_libretro.so|@/mnt/SDCARD/Roms/PS/CTR - Crash Team Racing (USA).chd|PCSX-ReARMed/PCSX-ReARMed.opt|pcsx_rearmed_drc_thread=disabled;pcsx_rearmed_memcard2=none;
+swanstation-ctr|swanstation_libretro.so|@/mnt/SDCARD/Roms/PS/CTR - Crash Team Racing (USA).chd|-|
+
+# Smaller systems (homebrew ROMs)
+stella2014-anguna|stella2014_libretro.so|A2600/anguna.bin|-|
+stella2014-halo|stella2014_libretro.so|A2600/halo2600.bin|-|
+gpgx-astroforce|genesis_plus_gx_libretro.so|MS/astroforce.sms|Genesis Plus GX/Genesis Plus GX.opt|
+picodrive-astroforce|picodrive_libretro.so|MS/astroforce.sms|PicoDrive/PicoDrive.opt|
+gearsystem-astroforce|gearsystem_libretro.so|MS/astroforce.sms|Gearsystem/Gearsystem.opt|
+fuse-cadaverion|fuse_libretro.so|ZX/cadaverion.tap|fuse/fuse.opt|
+wswan-wondercell|mednafen_wswan_libretro.so|WS/wondercell.wsc|Beetle WonderSwan/Beetle WonderSwan.opt|
+pcefast-greenspace|mednafen_pce_fast_libretro.so|PCE/GreenSpace.pce|Beetle PCE Fast/Beetle PCE Fast.opt|
+pcefast-playsample|mednafen_pce_fast_libretro.so|PCE/PlaySample.pce|Beetle PCE Fast/Beetle PCE Fast.opt|
+sgx-greenspace|mednafen_supergrafx_libretro.so|PCE/GreenSpace.pce|Beetle SuperGrafx/Beetle SuperGrafx.opt|
+ardens-choplifter|ardens_libretro.so|ARDUBOY/Choplifter.hex|-|
+ardens-arduboy3d|ardens_libretro.so|ARDUBOY/Arduboy3D.hex|-|

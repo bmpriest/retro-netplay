@@ -1,0 +1,9 @@
+# 32-bit Genesis Plus GX and QuickNES fault on misaligned LDM/STM under an arm64 kernel;
+# the A30's 32-bit kernel fixes those up. Emulate that:
+#   PRELOAD32=alignfix sh bin/batch.sh bin/cells-alignfix.txt
+# (PRELOAD32=busdump instead reports the faulting instruction.)
+quicknes-smb3-af|quicknes_libretro.so|FC/Super Mario Bros. 3 (USA) (Rev 1).nes|-|
+gpgx-sor2-af|genesis_plus_gx_libretro.so|MD/Streets of Rage 2 (USA).md|Genesis Plus GX/Genesis Plus GX.opt|
+gpgx-gunstar-af|genesis_plus_gx_libretro.so|MD/Gunstar Heroes (USA).md|Genesis Plus GX/Genesis Plus GX.opt|
+gpgx-sonicchaos-af|genesis_plus_gx_libretro.so|GG/Sonic Chaos (USA, Europe, Brazil).gg|Genesis Plus GX/Genesis Plus GX.opt|
+gpgx-astroforce-af|genesis_plus_gx_libretro.so|MS/astroforce.sms|Genesis Plus GX/Genesis Plus GX.opt|

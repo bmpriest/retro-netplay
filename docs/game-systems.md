@@ -190,6 +190,9 @@ same compatibility version on both devices. Those builds also matched spruce's
 different revisions, and the shared-pin Supafaust computed the same Super Mario
 Kart on armv7 and aarch64 (qemu, 3600 frames).
 
+Which of spruce's own 32-bit and 64-bit core builds can play each other, measured
+on device: [analysis/32-vs-64bit.md](analysis/32-vs-64bit.md).
+
 ### What "floats" means, and why it matters here
 
 From `workspace/all/cores/makefile`:

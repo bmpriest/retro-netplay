@@ -1,0 +1,26 @@
+# Per-frame traces where whole-state hashes are noise:
+#   RUN=corecmp-pair.sh sh bin/batch.sh bin/corecmp.txt
+gambatte-crystal|gambatte_libretro.so|GBC/Pokemon - Crystal Version (USA, Europe) (Rev 1).gbc|Gambatte/GBC.opt|
+quicknes-mm2|quicknes_libretro.so|FC/Mega Man 2 (USA).nes|-|
+gearboy-tetris|gearboy_libretro.so|GB/Tetris (World) (Rev 1).gb|-|
+gearboy-crystal|gearboy_libretro.so|GBC/Pokemon - Crystal Version (USA, Europe) (Rev 1).gbc|-|
+mgba-tetris|mgba_libretro.so|GB/Tetris (World) (Rev 1).gb|mGBA/mGBA.opt|
+mgba-crystal|mgba_libretro.so|GBC/Pokemon - Crystal Version (USA, Europe) (Rev 1).gbc|mGBA/mGBA.opt|
+mgba-mksc|mgba_libretro.so|GBA/Mario Kart - Super Circuit (USA).gba|mGBA/mGBA.opt|
+mgba-emerald|mgba_libretro.so|GBA/Pokemon - Emerald Version (USA, Europe).gba|mGBA/mGBA.opt|
+gpsp-aw2|gpsp_libretro.so|GBA/Advance Wars 2 - Black Hole Rising (USA).gba|gpSP/gpSP.opt|
+gpsp-emerald|gpsp_libretro.so|GBA/Pokemon - Emerald Version (USA, Europe).gba|gpSP/gpSP.opt|
+gpsp-mksc|gpsp_libretro.so|GBA/Mario Kart - Super Circuit (USA).gba|gpSP/gpSP.opt|
+pcsx-ctr|pcsx_rearmed_libretro.so|@/mnt/SDCARD/Roms/PS/CTR - Crash Team Racing (USA).chd|PCSX-ReARMed/PCSX-ReARMed.opt|pcsx_rearmed_drc_thread=disabled;pcsx_rearmed_memcard2=none;
+chimera-smk|chimerasnes_libretro.so|SFC/Super Mario Kart (USA).sfc|ChimeraSNES/ChimeraSNES.opt|
+gpsp-aw2-nodrc|gpsp_libretro.so|GBA/Advance Wars 2 - Black Hole Rising (USA).gba|gpSP/gpSP.opt|gpsp_drc=disabled;
+gpsp-mksc-nodrc|gpsp_libretro.so|GBA/Mario Kart - Super Circuit (USA).gba|gpSP/gpSP.opt|gpsp_drc=disabled;
+# Genesis Plus GX needs PRELOAD32=alignfix on an arm64 kernel (see cells-alignfix.txt)
+gpgx-sor2|genesis_plus_gx_libretro.so|MD/Streets of Rage 2 (USA).md|Genesis Plus GX/Genesis Plus GX.opt|
+gpgx-astroforce|genesis_plus_gx_libretro.so|MS/astroforce.sms|Genesis Plus GX/Genesis Plus GX.opt|
+# Added for the A30 + Brick run (2026-11-10)
+gambatte-tetris|gambatte_libretro.so|GB/Tetris (World) (Rev 1).gb|Gambatte/GB.opt|
+gpgx-gunstar|genesis_plus_gx_libretro.so|MD/Gunstar Heroes (USA).md|Genesis Plus GX/Genesis Plus GX.opt|
+gpgx-sonicchaos|genesis_plus_gx_libretro.so|GG/Sonic Chaos (USA, Europe, Brazil).gg|Genesis Plus GX/Genesis Plus GX.opt|
+gearsystem-sonicchaos|gearsystem_libretro.so|GG/Sonic Chaos (USA, Europe, Brazil).gg|Gearsystem/Gearsystem.opt|
+gearsystem-astroforce|gearsystem_libretro.so|MS/astroforce.sms|Gearsystem/Gearsystem.opt|

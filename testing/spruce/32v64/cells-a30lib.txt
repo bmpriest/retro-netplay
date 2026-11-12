@@ -1,0 +1,5 @@
+# 32-bit armGBA and SwanStation need GLIBCXX_3.4.32, which only spruce/a30/lib has:
+#   LIB32=/mnt/SDCARD/cc3264/lib32a30 sh bin/batch.sh bin/cells-a30lib.txt
+armgba-mksc-a30lib|armgba_libretro.so|GBA/Mario Kart - Super Circuit (USA).gba|armGBA/armGBA.opt|
+armgba-emerald-a30lib|armgba_libretro.so|GBA/Pokemon - Emerald Version (USA, Europe).gba|armGBA/armGBA.opt|
+swanstation-ctr-a30lib|swanstation_libretro.so|@/mnt/SDCARD/Roms/PS/CTR - Crash Team Racing (USA).chd|-|

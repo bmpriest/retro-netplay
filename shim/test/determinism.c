@@ -21,7 +21,30 @@
 
 #include "libretro.h"
 
-#define CHECKPOINT 500
+static unsigned CHECKPOINT = 500;
+static char sysdir[512] = "/tmp";
+static char vars_buf[2048];
+static struct { const char* key; const char* value; } vars[64];
+static int var_count = -1;
+static void vars_init(void) {
+	var_count = 0;
+	const char* src = getenv("STATECHECK_VARS");
+	if (!src) return;
+	snprintf(vars_buf, sizeof(vars_buf), "%s", src);
+	char* p = vars_buf;
+	while (p && *p && var_count < 64) {
+		char* semi = strchr(p, ';');
+		if (semi) *semi++ = '\0';
+		char* eq = strchr(p, '=');
+		if (eq) { *eq = '\0'; vars[var_count].key = p; vars[var_count].value = eq + 1; var_count++; }
+		p = semi;
+	}
+}
+static const char* var_lookup(const char* key) {
+	if (var_count < 0) vars_init();
+	for (int i = 0; i < var_count; i++) if (!strcmp(vars[i].key, key)) return vars[i].value;
+	return NULL;
+}
 
 static void *(*p_dl)(void);
 static unsigned cur_frame;
@@ -32,9 +55,21 @@ static bool env_cb(unsigned cmd, void* data) {
 		if (data) *(bool*)data = true;
 		return true;
 	case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: return true;
+	case RETRO_ENVIRONMENT_SET_VARIABLES: return true;
+	case RETRO_ENVIRONMENT_GET_VARIABLE: {
+		struct retro_variable* v = (struct retro_variable*)data;
+		if (!v || !v->key) return false;
+		const char* val = var_lookup(v->key);
+		if (!val) return false;
+		v->value = val;
+		return true;
+	}
+	case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE:
+		if (data) *(bool*)data = false;
+		return true;
 	case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
 	case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
-		if (data) *(const char**)data = "/tmp";
+		if (data) *(const char**)data = sysdir;
 		return true;
 	default: return false;
 	}
@@ -66,6 +101,8 @@ static int16_t input_cb(unsigned port, unsigned dev, unsigned idx, unsigned id) 
 int main(int argc, char** argv) {
 	if (argc < 3) { printf("usage: %s <core.so> <rom> [frames]\n", argv[0]); return 2; }
 	unsigned frames = (argc > 3) ? (unsigned)atoi(argv[3]) : 3000;
+	if (getenv("SYSDIR")) snprintf(sysdir, sizeof(sysdir), "%s", getenv("SYSDIR"));
+	if (getenv("CHECKPOINT")) CHECKPOINT = (unsigned)atoi(getenv("CHECKPOINT"));
 
 	void* h = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
 	if (!h) { printf("dlopen: %s\n", dlerror()); return 1; }
@@ -93,12 +130,15 @@ int main(int argc, char** argv) {
 	printf("core: %s %s\n", info.library_name ? info.library_name : "?",
 	       info.library_version ? info.library_version : "?");
 
+	void* rom = NULL; long len = 0;
+	if (!info.need_fullpath) {
 	FILE* rf = fopen(argv[2], "rb");
 	if (!rf) { printf("cannot open rom\n"); return 1; }
-	fseek(rf, 0, SEEK_END); long len = ftell(rf); fseek(rf, 0, SEEK_SET);
-	void* rom = malloc(len);
+	fseek(rf, 0, SEEK_END); len = ftell(rf); fseek(rf, 0, SEEK_SET);
+	rom = malloc(len);
 	if (fread(rom, 1, len, rf) != (size_t)len) { printf("short read\n"); return 1; }
 	fclose(rf);
+	}
 
 	core_init();
 	struct retro_game_info game = { argv[2], rom, (size_t)len, NULL };
