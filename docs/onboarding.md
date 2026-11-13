@@ -1,6 +1,7 @@
 # First-run onboarding
 
-The setup app opens `pak_onboarding.json` on the first normal launch. The wizard
+The setup app opens `pak_onboarding.json` (kept in `launcher/common/`;
+packaging puts it at the pak root) on the first normal launch. The wizard
 appears until the user reaches its last page and presses A. Completion is stored
 in `.userdata/shared/Netplay/onboarding-complete`, so pak updates do not repeat
 it. Remove that marker to show the wizard again. Quick Menu launches skip it.

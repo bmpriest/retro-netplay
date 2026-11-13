@@ -29,8 +29,9 @@ A handheld says "no" here because there is nothing on one console to share.
 - `-` - the shim does not drive this core, so launches are stock.
 
 The mode is chosen by the shim from the core it wraps, not from a menu:
-gambatte and gpSP get link, the paired cores (instanced link, turned on per core
-in Configuration > Cores) get instanced, everything else gets shared screen.
+gambatte and gpSP get link, the paired cores (instanced link, chosen by Netplay
+for the session; see "Session cores (engines)" below) get instanced, everything
+else gets shared screen.
 The DS emulators are not libretro cores; see the last table.
 
 ## Base
@@ -408,4 +409,4 @@ a supported core should work; none has been run.
 | System | Emulator | Multiplayer? | Link Cable? | Implementation |
 |---|---|---|---|---|
 | NDS | DSperate (DSP.pak, installed by Netplay) | no | **yes** - DS local wireless emulated, melonDS LAN protocol | **local wireless** - one DS per device; Mario Kart DS and Asphalt: Urban GT 2 race. See [nintendo-ds/dsperate.md](nintendo-ds/dsperate.md) |
-| NDS | DraStic (the user's NDS.pak 0.14.1, plus Netplay's radio overlay) | no | **yes**, through Netplay's radio hook | **local wireless** - pairs with DSperate too. See [nintendo-ds/drastic.md](nintendo-ds/drastic.md) |
+| NDS | DraStic (NDS.pak 0.14.1-0.15.1 from the Pak Store, plus Netplay's radio overlay) | no | **yes**, through Netplay's radio hook | **local wireless** - pairs with DSperate too. See [nintendo-ds/drastic.md](nintendo-ds/drastic.md) |

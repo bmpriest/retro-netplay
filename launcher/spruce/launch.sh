@@ -19,23 +19,17 @@ if ! PLATFORM="$(np_spruce_platform "$SPRUCE_PLATFORM")" ||
 fi
 export PLATFORM SPRUCE_PLATFORM
 
-# NextUI's UI code reads its fonts and images from a card root fixed at build
-# time; the spruce build moves that root to nextui/ here (see app/makefile).
-SYSTEM_PATH="$DIR/nextui/.system/$PLATFORM"
-USERDATA_PATH="$DIR/nextui/.userdata/$PLATFORM"
-SHARED_USERDATA_PATH="$DIR/nextui/.userdata/shared"
-HOME="$USERDATA_PATH"
-export SYSTEM_PATH USERDATA_PATH SHARED_USERDATA_PATH HOME
+# netplay.elf on spruce is headless and links only libc (app/spruce/engine.c).
+# HOME is where spruce's ALSA setup writes Netplay's config (below); it lives
+# with Netplay's state so an app update leaves it alone.
+HOME="$NETPLAY_STATE/home"
+export HOME
 PYUI_BASE_LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}
-LD_LIBRARY_PATH=$(np_spruce_engine_libraries) || {
-	[ "$1" = --env ] && exit 1
-	/mnt/SDCARD/App/PyUI/launch.sh -msgDisplay "Netplay needs Spruce's SDL2 runtime in App/PyUI/dll." -msgDisplayTimeMs 5000
-	exit 1
-}
-export LD_LIBRARY_PATH
-NETPLAY_ENGINE_LD_LIBRARY_PATH=$LD_LIBRARY_PATH
+# What PyUI starts netplay.elf with: the environment spruce gave this script,
+# not the one PyUI sets up for its own python and SDL.
+NETPLAY_ENGINE_LD_LIBRARY_PATH=$PYUI_BASE_LD_LIBRARY_PATH
 export NETPLAY_ENGINE_LD_LIBRARY_PATH
-mkdir -p "$USERDATA_PATH" "$SHARED_USERDATA_PATH" "$NETPLAY_STATE" "$NETPLAY_LOGS"
+mkdir -p "$HOME" "$NETPLAY_STATE" "$NETPLAY_LOGS"
 
 cd "$DIR" || exit 1
 LOG="$NETPLAY_LOGS/netplay.txt"
@@ -49,7 +43,7 @@ case "$1" in
 	--env)
 		# For the front end running inside spruce's PyUI (spruce_ui/pyui.py):
 		# netplay.elf's environment, as set up above, one VAR=value per line.
-		env | grep -E '^(PLATFORM|SPRUCE_PLATFORM|SDCARD_PATH|SYSTEM_PATH|USERDATA_PATH|SHARED_USERDATA_PATH|HOME|LD_LIBRARY_PATH|NETPLAY_[A-Z_]*)='
+		env | grep -E '^(PLATFORM|SPRUCE_PLATFORM|SDCARD_PATH|HOME|LD_LIBRARY_PATH|NETPLAY_[A-Z_]*)='
 		exit 0
 		;;
 	--invite) ;;

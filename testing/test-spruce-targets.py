@@ -47,8 +47,6 @@ class SpruceTargets(unittest.TestCase):
             write('spruce/scripts/helperFunctions.sh', 'PLATFORM=$TEST_MODEL\nPLATFORM_FAMILY=$TEST_FAMILY\nget_python_path() { echo "$SDCARD_PATH/fake-python"; }\n'
                   'device_names() { case "$PLATFORM" in Miniloong) echo MINILOONG_POCKET1 ;; A10MiniV4) echo A10MINIV4 ;; *) echo "$PLATFORM" ;; esac; echo DARKMOSS; }\n')
             write('fake-python', '#!/bin/sh\nprintf "%s\\n" "$PLATFORM" "$NETPLAY_PYUI_DEVICE" "$PYSDL2_DLL_PATH" "${SDL_VIDEODRIVER:-}" "${SDL_AUDIODRIVER:-}" "$NETPLAY_ENGINE_LD_LIBRARY_PATH" "$*" > "$TEST_RESULT"\n', True)
-            for library in ('libSDL2-2.0', 'libSDL2_image-2.0', 'libSDL2_ttf-2.0'):
-                write(f'App/PyUI/dll/{library}.so', 'fake SDL runtime')
             write('spruce/scripts/asound-setup.sh', '#!/bin/sh\nprintf "%s\\n" "$1" > "$TEST_ASOUND"\n', True)
             # The A30's PyUI runs on spruce's 32-bit python.
             write('spruce/bin/python/bin/MainUI', '#!/bin/sh\nprintf "%s\\n" "$PLATFORM" "$NETPLAY_PYUI_DEVICE" "$PYSDL2_DLL_PATH" "${SDL_VIDEODRIVER:-}" "${SDL_AUDIODRIVER:-}" "$NETPLAY_ENGINE_LD_LIBRARY_PATH" "$*" > "$TEST_RESULT"\n', True)
@@ -69,23 +67,9 @@ class SpruceTargets(unittest.TestCase):
                     values = output.read_text().splitlines()
                     self.assertEqual(values[:2], [build, identity])
                     self.assertEqual(values[-1], '-m spruce_ui')
-                    self.assertEqual((card/'asound').read_text(), f'{app}/nextui/.userdata/{build}\n')
-                    if build == 'my355':
-                        alias = card/'runtime/spruce-libs/libSDL2-2.0.so.0'
-                        self.assertEqual(alias.resolve(), card/'App/PyUI/dll/libSDL2-2.0.so')
-                        self.assertTrue(values[5].startswith(str(card/'runtime/spruce-libs') + ':'))
+                    self.assertEqual((card/'asound').read_text(), f'{card}/Saves/netplay/home\n')
                     if model in DARKMOSS:
                         self.assertEqual(values[3:5], ['kmsdrm', 'alsa'])
-
-    def test_missing_rk3566_sdl_fails_instead_of_loading_fbdev(self):
-        with tempfile.TemporaryDirectory() as directory:
-            env = {**os.environ, 'SDCARD_PATH': directory, 'PLATFORM': 'my355',
-                   'NETPLAY_RUNTIME_ROOT': str(Path(directory)/'runtime')}
-            result = subprocess.run(['sh', '-c', '. "$1"; np_spruce_engine_libraries',
-                                     'test', str(ROOT/'launcher/spruce/firmware.sh')],
-                                    env=env, capture_output=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(result.stdout, b'')
 
     def test_other_nightly_models_are_not_mapped(self):
         script = '. "$1"; np_spruce_platform "$2"'

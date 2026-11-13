@@ -34,8 +34,9 @@ def control(*args: str) -> str:
     env = os.environ.copy()
     if ENGINE_ENV is not None:
         env.update(ENGINE_ENV)
-    if engine_libraries := env.get("NETPLAY_ENGINE_LD_LIBRARY_PATH"):
-        env["LD_LIBRARY_PATH"] = engine_libraries
+    # netplay.elf links only libc: give it spruce's library path, not PyUI's.
+    if "NETPLAY_ENGINE_LD_LIBRARY_PATH" in env:
+        env["LD_LIBRARY_PATH"] = env["NETPLAY_ENGINE_LD_LIBRARY_PATH"]
     result = subprocess.run(
         [str(ENGINE), "--ctl", *args], capture_output=True, text=True, check=False, env=env
     )
@@ -800,8 +801,9 @@ def start_prompt_input(args: dict[str, str]) -> subprocess.Popen:
     presses out of its queue. Started before PyUI so nothing pressed meanwhile
     reaches the menu."""
     env = os.environ.copy()
-    if engine_libraries := env.get("NETPLAY_ENGINE_LD_LIBRARY_PATH"):
-        env["LD_LIBRARY_PATH"] = engine_libraries
+    # netplay.elf links only libc: give it spruce's library path, not PyUI's.
+    if "NETPLAY_ENGINE_LD_LIBRARY_PATH" in env:
+        env["LD_LIBRARY_PATH"] = env["NETPLAY_ENGINE_LD_LIBRARY_PATH"]
     command = [str(ENGINE), "--prompt", "--input-only", "1",
                "--accept", args.get("accept", ""), "--decline", args.get("decline", "NOT NOW"),
                "--browse", args.get("browse", ""), "--timeout", args.get("timeout", "60")]

@@ -18,10 +18,10 @@ that radio has to reproduce is in [ds-wifi-mp-protocol.md](ds-wifi-mp-protocol.m
 | `drastic-wifi/src/radio/` | this repo | DSperate's `Wifi` (cut loose from its core), `LanMp`, vendored ENet, and the C glue (`radio.cpp`) |
 | `drastic-wifi/src/radio_hook.c` | this repo | Attaches the radio to DraStic 2.5.2.0 (AArch64) |
 | `drastic-wifi/pak/launch.sh` | this repo | minui-nintendo-ds-pak's launcher plus the Netplay session |
-| `make cores-nds` | Makefile | Builds the overlay for tg5040, tg5050 and h700 into `dist/nds/<p>/`, and fetches NDS.pak 0.14.1 into `dist/nds/base/` |
+| `make cores-nds` | Makefile | Builds the overlay for tg5040, tg5050 and h700 into `dist/nds/<p>/`, and checks that NDS.pak 0.15.1's DraStic is still the hooked build |
 | `cores/nds/<p>/` | in Netplay.pak | `NDS.pak/{launch.sh, drastic/libs/libdrastic_wifi.so}` and `drastic.sha256` |
 | `launcher/nextui/pak-manage.sh nds` | in Netplay.pak | Adds the overlay to `Emus/<p>/NDS.pak`, keeps what it replaces, puts it back |
-| Configuration > Cores > Extras > NDS | the app | Adds the overlay (and NDS.pak itself when the card has none), takes it out, or deletes NDS.pak |
+| Configuration > Cores > Extras > NDS | the app | Adds the overlay to an installed NDS.pak, takes it out, or deletes NDS.pak |
 
 drastic-wifi is GPL-3.0-or-later (it carries DSperate and melonDS code); the
 rest of Netplay.pak keeps its own license.
@@ -31,10 +31,11 @@ rest of Netplay.pak keeps its own license.
 Netplay adds two files to the NDS.pak already on the card, and only if that
 pak's `drastic` is the build the radio hooks (`drastic.sha256`, the 2.5.2.0
 release minui-nintendo-ds-pak ships), so the user's DraStic settings stay
-theirs. A card with no NDS.pak gets minui-nintendo-ds-pak's 0.14.1 release,
-unmodified, first: `make cores-nds` downloads it (pinned by SHA-256) into
-`cores/nds/base/`, and `pak-manage.sh nds install` copies it in before the
-overlay. `pak-manage.sh nds remove` deletes NDS.pak from the card.
+theirs. NDS.pak itself comes from the Pak Store (minui-nintendo-ds-pak;
+0.14.1 through 0.15.1 carry the hooked DraStic); a card without it is told to
+install it there first. Netplay no longer ships it. (`pak-manage.sh` still
+installs a base from `cores/nds/base/` when one is present, for test builds.)
+`pak-manage.sh nds remove` deletes NDS.pak from the card.
 
 The launcher the overlay replaces is kept under
 `.userdata/shared/Netplay/nds/originals/` and put back when the setting is

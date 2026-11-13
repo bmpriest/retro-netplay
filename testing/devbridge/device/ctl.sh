@@ -25,13 +25,9 @@ if [ -f /mnt/SDCARD/App/Netplay/launcher/firmware.sh ]; then
 	. /mnt/SDCARD/App/Netplay/launcher/firmware.sh
 	pak=$NETPLAY_PAK
 	PLATFORM=$(np_spruce_platform "$PLATFORM") || { echo "error no Netplay build for this device"; exit 1; }
-	SYSTEM_PATH=$pak/nextui/.system/$PLATFORM
-	USERDATA_PATH=$pak/nextui/.userdata/$PLATFORM
-	SHARED_USERDATA_PATH=$pak/nextui/.userdata/shared
 	LOGS_PATH=$NETPLAY_LOGS
-	HOME=$USERDATA_PATH
-	LD_LIBRARY_PATH=$(np_spruce_engine_libraries) || exit 1
-	export PLATFORM SYSTEM_PATH USERDATA_PATH SHARED_USERDATA_PATH LOGS_PATH HOME LD_LIBRARY_PATH
+	HOME=$NETPLAY_STATE/home
+	export PLATFORM LOGS_PATH HOME
 else
 	for pak in /mnt/SDCARD/Tools/*/Netplay.pak; do
 		[ -x "$pak/launch.sh" ] && break

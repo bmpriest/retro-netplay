@@ -48,11 +48,11 @@ gcc -std=gnu99 -Wall -Werror -Iapp "$TMP/dump.c" app/hints.c -o "$TMP/dump"
 } > "$TMP/keys"
 
 echo "== pak_hints.json"
-"$TMP/dump" pak_hints.json < "$TMP/keys"
+"$TMP/dump" launcher/common/pak_hints.json < "$TMP/keys"
 echo "  ok   every hint the app asks for is there ($(sort -u "$TMP/keys" | wc -l) keys)"
 
 # A platform sibling wins on its platform only.
-printf 'cores.SFC.ready\n' | "$TMP/dump" pak_hints.json my282
+printf 'cores.SFC.ready\n' | "$TMP/dump" launcher/common/pak_hints.json my282
 cat > "$TMP/plat.c" <<'EOF'
 #include <stdio.h>
 #include <string.h>
@@ -67,7 +67,7 @@ int main(int argc, char** argv) {
 }
 EOF
 gcc -std=gnu99 -Wall -Werror -Iapp "$TMP/plat.c" app/hints.c -o "$TMP/plat"
-"$TMP/plat" pak_hints.json
+"$TMP/plat" launcher/common/pak_hints.json
 echo "  ok   a .<platform> sibling replaces the hint on that platform only"
 
 printf '{"a": {"b": "x\\"y \\u00e9"}, "n": 3, "l": [1, {"c": "d"}]}' > "$TMP/t.json"

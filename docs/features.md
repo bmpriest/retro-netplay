@@ -20,7 +20,7 @@ Status words:
 
 Both devices run the same game, and both see one console: inputs are exchanged
 every frame and both emulators advance in lockstep. Systems: NES, SNES, Genesis
-and its relatives, PlayStation. Two players.
+and its relatives, Master System, Game Gear, PlayStation. Two players.
 
 - The two devices need the same ROM content (file names may differ) and a core
   that computes identically on both. When the installed cores differ, both load
@@ -44,25 +44,27 @@ adapter is carried over the network. Two players.
 - **Game Boy Advance** (gpSP): the Wireless Adapter, plus gpSP's special cases
   for Pokémon generation III and Advance Wars 1 and 2. Other GBA multiplayer
   games are not reached by gpSP; see instanced mGBA below.
-- **armGBA** (spruce's default GBA/GB/GBC core): set its **Link Mode** core
-  option before joining; the host's setting is used on both devices.
-  **Separate** links one console per device over the cable or Wireless
-  Adapter — the full serial link, not just gpSP's titles. **Together** runs
-  every console on both devices with shared inputs; each device shows and
-  plays its own. Set Number of Players to the number of devices.
+- **armGBA** (spruce's GBA core): Netplay picks its Link Mode for the
+  session, Together where both devices can run it (the A30 and up), Separate
+  on the Mini family. **Separate** links one console per device over the
+  cable or Wireless Adapter: the full serial link, not just gpSP's titles.
+  **Together** runs every console on both devices with shared inputs; each
+  device shows and plays its own.
 
 Each device keeps its own save. Reset affects only the local console.
 
 ### Instanced link (Experimental)
 
 Each device emulates *both* consoles and the cable between them, and only
-controller inputs cross the network, so the cable never waits on WiFi. Turned
-on per core in Configuration > Cores. Both dual modes default to off.
+controller inputs cross the network, so the cable never waits on WiFi. Netplay
+uses it whenever both devices can (see [engine-matrix.md](engine-matrix.md)).
 
 - **Gambatte**: Game Boy and Game Boy Color, any link game. A Pokémon trade
   between Silver and Crystal ran 13,500 frames without a desync.
 - **mGBA**: every GBA link mode, including games gpSP cannot link, such as
-  Mario Kart: Super Circuit. Installs Netplay's MGBA.pak on NextUI; Spruce uses its GBA emulator selection. Too heavy for the A30.
+  Mario Kart: Super Circuit. 64-bit devices only. On NextUI it needs Netplay's
+  MGBA.pak (Configuration > Cores > Extras); without it, GBA falls back to gpSP
+  and a game gpSP cannot link names the device that should install mGBA.
 
 Both devices need both games, because no ROM crosses the network. If either
 device lacks one, the game restarts on the ordinary link path.
@@ -75,7 +77,7 @@ not covered.
 
 - **DSperate** (DSP.pak, which Netplay installs): see
   [nintendo-ds/dsperate.md](nintendo-ds/dsperate.md).
-- **DraStic** (the user's NDS.pak, with Netplay's radio added): see
+- **DraStic** (NDS.pak from the Pak Store, with Netplay's radio added): see
   [nintendo-ds/drastic.md](nintendo-ds/drastic.md).
 - Any pairing works, DSperate and DraStic included, as they share melonDS's
   LAN protocol.
@@ -173,6 +175,11 @@ session ends. See [analysis/core-options.md](analysis/core-options.md).
 
 ## Cores
 
+- **Session cores** (Experimental): Netplay picks one core per system for each
+  session from what both devices have, by device tier (64-bit, A30, Mini
+  family), and loads it in place of the firmware's choice. Players don't pick
+  cores. The full table is [engine-matrix.md](engine-matrix.md); peers on
+  builds before v1.0.0 keep each device's own core.
 - **Compatibility cores** (Stable): when two devices' installed cores would
   compute differently, both load the same packaged build for that session, and
   the game shows "Starting with compatibility core..." for two seconds. When no
@@ -218,7 +225,8 @@ install it (see [analysis/varnish.md](analysis/varnish.md)). Not on the A30.
 | my355 | Miyoo Flip | Untested |
 
 Spruce has a native PyUI front end, a combined core list and session-aware
-RetroArch/DS wrappers. Its RC device targets and validation limits are listed in
+RetroArch/DS wrappers, on the devices above plus the Miyoo Mini family and
+spruce's dArkMoss devices. Its device coverage and validation limits are in
 [analysis/spruce-parity.md](analysis/spruce-parity.md). NextUI-only features are
 the quick menu, status icon, GameSwitcher shortcut and Ad Hoc Network Switch.
 

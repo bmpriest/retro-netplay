@@ -19,20 +19,27 @@ launchers read the session themselves.
 ## Spruce integration
 
 The Spruce front end is `app/spruce`, using the installed PyUI runtime and
-theme. Its native `netplay.elf --ctl` backend is the same session control plane.
-`launcher/spruce/firmware.sh` maps Spruce model names onto four AArch64 build
-directories; the Flip build also serves the RK3566 RGB30, RGB20SX and Pocket 1.
-The RK3566 native control backend uses the H700 SDK's standard SDL/GLES ABI
-rather than the Flip SDK's vendor Mali hook; cores still use the Flip build.
-At runtime its native loader prefers temporary aliases to Spruce's own SDL
-libraries, preserving the KMSDRM backend on dArkMoss.
+theme; it draws everything, invitations included. Behind it, spruce's
+`netplay.elf` is a headless engine (`app/spruce/engine.c`): `--ctl` commands,
+an invitation's answer read from the grabbed pad (`--prompt`) and `--nudge`.
+It shares `app/control.c` (the core table, arming, `--ctl`) with the NextUI
+app, whose screens stay in `main.c`, and links only libc and libdl.
+`launcher/spruce/firmware.sh` maps Spruce model names onto build directories:
+`tg5040`, `tg5050`, `my355` and `h700` (AArch64), `my282` for the A30 and
+`my285` for the Miyoo Mini family (ARMv7; the Mini runs the A30's shim and
+cores). The Flip build also serves every dArkMoss device (RK3566 and RK3326).
+The my355 engine is compiled with the H700 toolchain; cores still use the
+Flip build.
 The app metadata allowlist and launcher runtime selection must both cover a
 model. An executable-presence check is not an architecture compatibility test.
 
-Spruce bind-mounts wrappers over `ra64.universal`/`ra64.h700` and the supported
-AArch64 DS executables, stashing the originals in `/tmp/netplay`. It preserves
-Spruce's emulator configuration and passes through when unarmed. 32-bit
-RetroArch/DS paths are not routed. State is in `Saves/netplay/`, with logs in
+Spruce bind-mounts wrappers over its 64-bit and 32-bit RetroArch binaries
+(`ra64.*`, `ra32.*`, and the Mini Flip's `RetroArch/retroarch`) and its DS
+executables (`drastic`, `drastic64`, `dsperate`), stashing the originals in
+`/tmp/netplay`. It preserves Spruce's emulator configuration and passes
+through when unarmed. In a session the wrapper loads the core Netplay agreed
+for the system (`launcher/common/core-route.sh` `np_engine_core`), and a
+64-bit device paired with a 32-bit one runs 32-bit RetroArch and cores. State is in `Saves/netplay/`, with logs in
 `Saves/netplay/logs/`. See [the device matrix](analysis/spruce-parity.md).
 
 ## The parts
@@ -47,7 +54,7 @@ RetroArch/DS paths are not routed. State is in `Saves/netplay/`, with logs in
 | Cores | `cores/` | Gambatte and gpSP link builds, the paired (dual) cores, MGBA.pak, compatibility cores, `udhcpd` |
 | DS | `cores/dsperate/`, `cores/drastic-wifi/` | DSP.pak, and the DraStic radio overlay |
 | Varnish | `dist/varnish/` (built from Helaas's Varnish.pak) | Draws the icon and quick menu over NextUI |
-| Hints | `pak_hints.json` | All menu hint text, editable on the card |
+| Hints | `launcher/common/pak_hints.json` (the pak root on the card) | All menu hint text, editable on the card |
 
 ## A session, end to end
 

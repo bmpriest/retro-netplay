@@ -9,10 +9,9 @@
 #
 #   make PLATFORM=tg5040 NEXTUI=/path/to/NextUI [FIRMWARE=spruce]
 #
-# FIRMWARE=spruce builds the same app for spruce on the same hardware. NextUI's
-# UI code still draws it, but spruce owns the device's settings, so libmsettings
-# is replaced by spruce/msettings.c, which never touches the hardware; and the
-# UI's compiled-in card root moves into the app's own folder (see spruce/).
+# FIRMWARE=spruce builds the headless engine behind spruce's PyUI front end
+# instead: spruce/engine.c with the session control the app shares
+# (control.c), no screens and no SDL - it links only libc and libdl.
 ###########################################################
 
 SUPPORTED_PLATFORMS = tg5040 tg5050 my282 my355 h700
@@ -47,7 +46,7 @@ ifeq (,$(filter $(FIRMWARE),nextui spruce))
 $(error invalid FIRMWARE '$(FIRMWARE)'. Supported: nextui spruce)
 endif
 
-SOURCE   = main.c netsetup.c engines.c hints.c onboarding.c qoi.c nextui/chordcap.c \
+SOURCE   = main.c control.c netsetup.c engines.c hints.c onboarding.c qoi.c nextui/chordcap.c \
            $(COMMON)/api.c $(COMMON)/utils.c $(COMMON)/config.c $(COMMON)/scaler.c \
            $(PLATDIR)/platform.c
 
@@ -62,22 +61,12 @@ endif
 
 BIN      = ../bin/$(PLATFORM)
 ifeq (spruce,$(FIRMWARE))
-# platform.h fixes the card root NextUI's UI reads its fonts and settings from.
-# A copy with that root moved into App/Netplay/nextui is put first on the
-# include path; its include guard is the original's, so it is the one
-# platform.c sees too.
-SPRUCE_INC = ../build/spruce/$(SPRUCE_RUNTIME_PLATFORM)/$(PLATFORM)/include
-INCDIR  := -I$(SPRUCE_INC) $(INCDIR)
-SOURCE  += spruce/msettings.c
+SOURCE   = spruce/engine.c control.c netsetup.c engines.c
 BIN      = ../bin/spruce/$(SPRUCE_RUNTIME_PLATFORM)
 FIRMWARE_FLAGS = -DNETPLAY_SPRUCE
-# Retain only libraries actually used by this frontend. The top-level Spruce
-# target also selects a standard SDL/GLES backend for RK3566 devices, since
-# the Flip SDK's vendor Mali hook is absent from the other firmware bases.
-LDFLAGS := -Wl,--as-needed $(LDFLAGS)
 endif
 
-CFLAGS  += $(OPT) $(INCDIR) -DPLATFORM=\"$(if $(SPRUCE_INC),$(SPRUCE_RUNTIME_PLATFORM),$(PLATFORM))\" $(FIRMWARE_FLAGS) -std=gnu99
+CFLAGS  += $(OPT) $(INCDIR) -DPLATFORM=\"$(if $(filter spruce,$(FIRMWARE)),$(SPRUCE_RUNTIME_PLATFORM),$(PLATFORM))\" $(FIRMWARE_FLAGS) -std=gnu99
 LDFLAGS += -L$(WS)/$(PLATFORM)/libmsettings
 ifneq (,$(SDKPREFIX))
 LDFLAGS += -L$(SDKPREFIX)/lib
@@ -97,9 +86,13 @@ BROKER_PRODUCT = $(BIN)/$(BROKER_TARGET)
 WIFIPS_PRODUCT = $(BIN)/$(WIFIPS_TARGET)
 QUICKMENU_PRODUCT = $(BIN)/$(QUICKMENU_TARGET)
 
-all: $(if $(SPRUCE_INC),$(SPRUCE_INC)/platform.h)
+all:
 	@mkdir -p $(BIN)
+ifeq (spruce,$(FIRMWARE))
+	$(CROSS_COMPILE)gcc $(SOURCE) -o $(PRODUCT) $(CFLAGS) $(BROKER_LDFLAGS)
+else
 	$(CROSS_COMPILE)gcc $(SOURCE) -o $(PRODUCT) $(CFLAGS) $(LDFLAGS)
+endif
 	@echo "built $(PRODUCT)"
 	$(CROSS_COMPILE)gcc broker.c netsetup.c engines.c -o $(BROKER_PRODUCT) $(CFLAGS) $(BROKER_LDFLAGS)
 	@echo "built $(BROKER_PRODUCT)"
@@ -111,11 +104,6 @@ ifeq (nextui,$(FIRMWARE))
 	$(CROSS_COMPILE)gcc nextui/quickmenu.c netsetup.c engines.c -o $(QUICKMENU_PRODUCT) $(CFLAGS) $(BROKER_LDFLAGS)
 	@echo "built $(QUICKMENU_PRODUCT)"
 endif
-
-$(SPRUCE_INC)/platform.h: $(PLATDIR)/platform.h
-	@mkdir -p $(SPRUCE_INC)
-	sed 's|^#define SDCARD_PATH  *"/mnt/SDCARD"|#define SDCARD_PATH "/mnt/SDCARD/App/Netplay/nextui"|' $< > $@
-	@grep -q 'App/Netplay/nextui' $@ || { echo "SDCARD_PATH not found in $<"; rm -f $@; exit 1; }
 
 clean:
 	rm -f ../bin/*/$(TARGET) ../bin/spruce/*/* ../bin/*/$(BROKER_TARGET) ../bin/*/$(WIFIPS_TARGET) ../bin/*/$(QUICKMENU_TARGET)

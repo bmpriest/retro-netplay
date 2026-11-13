@@ -9,18 +9,29 @@ partly done along the way.
 
 ### Core edition and downloads
 
-The current RC builds `NextUI-Netplay-Complete.zip` and
-`Spruce-Netplay-Complete.zip`, with compatibility cores bundled for offline use.
-See [release.md](release.md) for the actual layouts and supported targets.
+v1.0.0 ships `NextUI-Netplay-Complete.zip` (also the Pak Store download) and
+`Spruce-Netplay-Complete.zip`, with compatibility cores bundled for offline
+use. NDS.pak is no longer bundled; NextUI users install it from the Pak Store.
+See [release.md](release.md) for the layouts and supported targets.
 
-A smaller Core edition remains planned: shared-screen support, ordinary
-Gambatte/gpSP, paired cores, MGBA.pak/DSP.pak on NextUI, and the DraStic radio
-without the base NDS.pak. It should refer NextUI users to the Pak Store for
-NDS.pak and download compatibility cores from a version-pinned release.
-Neither the in-app downloader nor `release-assets` manifest tooling exists yet.
-Downloads need verified TLS, a pinned URL/size/hash manifest, atomic staging
-and recovery from interrupted installs. These are follow-up work, not RC
-Complete features.
+A smaller edition that downloads compatibility cores from a version-pinned
+release is still planned. Neither the in-app downloader nor the manifest
+tooling exists yet. Downloads need verified TLS (the Brick has no CA
+certificates), a pinned URL/size/hash manifest, atomic staging and recovery
+from interrupted installs. A store update unzips over the pak without deleting
+anything, so the downloader must check and replace cores a Complete install
+left behind. `pak.json`'s `release_filename` can change between releases.
+
+### Release automation
+
+For 1.1.0: a workflow that, on a published (non-pre-release) GitHub release,
+checks the tag matches `pak.json` and `SOURCE_COMMIT`, then opens a spruceOS
+pull request with `App/Netplay` from the Spruce zip, as Cheevos does.
+
+### Spruce 32-bit gaps
+
+No ARMv7 compatibility-core set or 32-bit DSperate ships for spruce yet, and DS
+on the A30 and Mini family is untested.
 
 ### USB-C cable
 
@@ -30,7 +41,7 @@ Plan: [analysis/usb-cable-plan.md](analysis/usb-cable-plan.md). Branch
 
 ### Onboarding and RetroArch
 
-First-run onboarding is implemented (`pak_onboarding.json`), including the
+First-run onboarding is implemented (`launcher/common/pak_onboarding.json`), including the
 optional Wi-Fi power-saving choice and save-backup guidance. RetroArch protocol
 selection and Spruce integration are implemented. Broader external-firmware
 coverage remains future work; NETPACKET link modes use LinkPlay.

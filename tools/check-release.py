@@ -41,15 +41,15 @@ def check(path, spruce):
         require('README.md')
         commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT).strip()
         assert require('SOURCE_COMMIT').strip() == commit, 'archive source commit differs from checkout'
-        require('docs/release.md')
+        assert not any(name.startswith(prefix + 'docs/') for name in names), 'docs/ is not shipped'
         require('launcher/invite.sh', True)
         require('pak_onboarding.json')
+        require('pak_hints.json')
+        assert prefix + 'launcher/pak_hints.json' not in names, 'hint files left in launcher/'
         for platform in platforms:
             for name in ('netplay.elf', 'netplay-broker.elf', 'netplay-wifips.elf', 'netplay_shim.so'):
                 relative = f'bin/{platform}/{name}'
                 data = elf(relative, platform)
-                if spruce and platform == 'my355' and name == 'netplay.elf':
-                    assert b'libmali_hook.so' not in data, 'RK3566 backend depends on the Flip-only graphics hook'
                 local = ROOT/'bin'/('spruce' if spruce and name.endswith('.elf') else '')/platform/name
                 assert hashlib.sha256(data).digest() == hashlib.sha256(local.read_bytes()).digest(), f'stale binary: {relative}'
             for core in ('gambatte', 'gpsp', 'gambatte_dual', 'mgba_dual'):
@@ -66,8 +66,15 @@ def check(path, spruce):
             assert set(config['devices']) == {'TRIMUI_A133P', 'TRIMUI_SMART_PRO_S', 'MIYOO_FLIP', 'MIYOO_A30', 'MIYOO_MINI_FAMILY', 'ANBERNIC_RGXX', 'DARKMOSS'}
             for platform in platforms:
                 elf(f'bin/{platform}/libdrastic_wifi.so', platform)
-                for name in ('libsamplerate.so.0', 'libzip.so.5'):
-                    require(f'bin/{platform}/{name}')
+            # The engine behind PyUI is headless: no SDL, GL or NextUI runtime.
+            engines = [n for n in names if n.startswith(prefix + 'bin/') and n.endswith('/netplay.elf')]
+            assert len(engines) == 6, engines
+            for name in engines:
+                data = archive.read(name)
+                for library in (b'libSDL2', b'libGLES', b'libEGL', b'libmsettings', b'libsamplerate', b'libzip'):
+                    assert library not in data, f'{name} links {library.decode()}'
+            assert not any(n.startswith(prefix + 'nextui/') for n in names), 'NextUI runtime is packaged'
+            assert not any(n.startswith(prefix + 'bin/') and '/stubs/' in n for n in names), 'stub libraries are packaged'
         else:
             # DraStic comes from the Pak Store's NDS.pak; only the overlay ships.
             assert not any(name.startswith('cores/nds/base/') for name in names), 'DraStic is bundled'

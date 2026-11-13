@@ -626,10 +626,9 @@ corecmp:
 ###########################################################
 # spruce: the same app, shim and cores as App/Netplay.
 #
-# PyUI draws the normal app; the native control plane and invitation prompts
-# retain NextUI resources. Four build directories cover the selected TrimUI,
-# H700 and RK3566 devices. Bundle missing native libraries from the pinned
-# NextUI release; RK3566 selects Spruce's installed SDL runtime instead.
+# PyUI draws the whole app, invitations included. netplay.elf on spruce is
+# the headless engine behind it (app/spruce/engine.c): session control only,
+# linking libc and libdl, so nothing from NextUI's runtime is packaged.
 ###########################################################
 
 SPRUCE_PLATFORMS := tg5040 tg5050 my355 h700 my282 my285
@@ -638,43 +637,9 @@ SPRUCE_PLATFORMS := tg5040 tg5050 my355 h700 my282 my285
 # runs the A30's shim and packaged cores; only its app binaries are its own.
 SPRUCE_STAGE     := dist/stage-spruce
 SPRUCE_ARCHIVE   := dist/Spruce-Netplay-Complete.zip
-NEXTUI_BASE_URL    := https://github.com/LoveRetro/NextUI/releases/download/v6.15.0/NextUI-20261013-0-base.zip
-NEXTUI_BASE_SHA256 := d660d064a800bb7019b3f1f0c9d7254fdc33e92cf478e6cc9b480d6788be8f2e
-NEXTUI_BASE_ZIP    := .cache/NextUI-20261013-0-base.zip
-NEXTUI_SYSTEM      := dist/nextui-v6.15.0/.system
-SPRUCE_LIBS_tg5040 := libsamplerate.so.0 libzip.so.5
-SPRUCE_LIBS_tg5050 := libsamplerate.so.0 libzip.so.5
-SPRUCE_LIBS_my355  := libsamplerate.so.0 libzip.so.5 libcrypto.so.1.1 \
-                      libSDL2-2.0.so.0 libSDL2_image-2.0.so.0 libSDL2_ttf-2.0.so.0
-SPRUCE_LIBS_h700   := libsamplerate.so.0 libzip.so.5 libcrypto.so.1.1 \
-                      libSDL2-2.0.so.0 libSDL2_image-2.0.so.0 libSDL2_ttf-2.0.so.0
-# The my282 (A30) binaries link only SDL2/GLES/libc (see readelf -d), and
-# the NextUI base zip has no .system/my282 to take extra libs from anyway.
-SPRUCE_LIBS_my282  :=
-SPRUCE_LIBS_my285  :=
-# NEEDED libraries with nothing in them, for a device without them (the Mini
-# Flip: no GPU, no SDL outside spruce's PyUI). netplay.elf never draws on
-# spruce and binds every SDL/GL call lazily, so these only satisfy the loader.
-SPRUCE_STUB_LIBS   := libSDL2-2.0.so.0 libSDL2_image-2.0.so.0 libSDL2_ttf-2.0.so.0 libGLESv2.so
-
-$(NEXTUI_BASE_ZIP):
-	@mkdir -p .cache
-	@curl -fsSL -o "$@.tmp" "$(NEXTUI_BASE_URL)"
-	@printf '%s  %s\n' "$(NEXTUI_BASE_SHA256)" "$@.tmp" | sha256sum -c - >/dev/null
-	@mv "$@.tmp" "$@"
-
-$(NEXTUI_SYSTEM)/.spruce-runtime: $(NEXTUI_BASE_ZIP) Makefile
-	@printf '%s  %s\n' "$(NEXTUI_BASE_SHA256)" "$<" | sha256sum -c - >/dev/null
-	@rm -rf dist/nextui-v6.15.0 && mkdir -p dist/nextui-v6.15.0
-	@unzip -q -p "$<" MinUI.zip > dist/nextui-v6.15.0/MinUI.zip
-	@cd dist/nextui-v6.15.0 && unzip -q MinUI.zip '.system/res/*' \
-		$(foreach p,$(sort h700 $(filter-out my355,$(SPRUCE_PLATFORMS))),$(foreach l,$(SPRUCE_LIBS_$(p)),'.system/$(p)/lib/$(l)')) && rm MinUI.zip
-	@touch "$@"
-
-# The RK3566 targets share the Flip's cores, but use the H700 SDK's standard
-# SDL/GLES backend for the native control plane/prompts. The Flip SDK links a
-# vendor libmali_hook.so.1 unavailable on the other RK3566 Spruce bases.
-# PLATFORM at runtime still selects my355's cores, state and Wi-Fi profile.
+# The my355 build (the Flip and every dArkMoss device) is compiled with the
+# H700 toolchain, the build those bases have run so far; PLATFORM at runtime
+# still selects my355's cores, state and Wi-Fi profile.
 app-spruce:
 	@for p in $(SPRUCE_PLATFORMS); do \
 		echo "== app spruce $$p"; \
@@ -682,42 +647,31 @@ app-spruce:
 		$(MAKE) -s -C "$(BUILDER)" build PLATFORM=$$sdk PROJECT="$$PWD" \
 			CMD='sh -c "cd app && make PLATFORM='$$sdk' SPRUCE_RUNTIME_PLATFORM='$$p' FIRMWARE=spruce NEXTUI=/opt/nextui-src"' || exit 1; \
 	done
-	@$(MAKE) -s -C "$(BUILDER)" build PLATFORM=my282 PROJECT="$$PWD" \
-		CMD='sh app/spruce/stub-libs.sh bin/spruce/my285/stubs arm-a30-linux-gnueabihf-gcc $(SPRUCE_STUB_LIBS)' 
 	@ls -la bin/spruce/*/netplay*.elf | awk '{printf "   %-46s %s bytes\n", $$NF, $$5}'
 
 dist-spruce: $(foreach p,$(SPRUCE_PLATFORMS),check-shim-$(if $(filter my285,$(p)),my282,$(p)) check-spruce-app-$(p)) check-netplay-cores check-udhcpd check-compatibility \
-             $(DRASTIC_RADIO) \
-             $(NEXTUI_SYSTEM)/.spruce-runtime
+             $(DRASTIC_RADIO)
 	@rm -rf "$(SPRUCE_STAGE)" "$(SPRUCE_ARCHIVE)"
-	@D="$(SPRUCE_STAGE)/App/Netplay"; mkdir -p "$$D/nextui/.system" "$$D/backup" && \
-	$(foreach p,$(SPRUCE_PLATFORMS),libs_$(p)="$(SPRUCE_LIBS_$(p))";) \
+	@D="$(SPRUCE_STAGE)/App/Netplay"; mkdir -p "$$D/backup" && \
 	launcher/flatten.sh spruce "$$D/launcher" && \
 	mv "$$D/launcher/launch.sh" "$$D/launcher/config.json" "$$D/" && \
-	rm -f "$$D/launcher/session.conf.example" && \
-	cp launcher/common/session.conf.example pak_hints.json pak_onboarding.json "$$D/" && \
-	cp README.md "$$D/" && cp -R docs "$$D/" && \
+	mv "$$D/launcher/session.conf.example" "$$D/launcher/pak_hints.json" \
+	   "$$D/launcher/pak_onboarding.json" "$$D/" && \
+	cp README.md "$$D/" && \
 	git rev-parse HEAD > "$$D/SOURCE_COMMIT" && \
 	if [ -d res/onboarding ]; then mkdir -p "$$D/res" && cp -R res/onboarding "$$D/res/"; fi && \
 	mkdir -p "$$D/cores/retroarch-options" && \
 	cp -R cores/retroarch-options/spruce "$$D/cores/retroarch-options/" && \
 	cp res/spruce-netplay.png "$$D/netplay.png" && \
 	mkdir -p "$$D/spruce_ui" && cp app/spruce/*.py app/spruce/CHEEVOS-LICENSE "$$D/spruce_ui/" && \
-	cp -R "$(NEXTUI_SYSTEM)/res" "$$D/nextui/.system/res" && \
 	for p in $(SPRUCE_PLATFORMS); do \
-		mkdir -p "$$D/bin/$$p" "$$D/nextui/.system/$$p/bin" && \
-		cp app/spruce/governor.sh "$$D/nextui/.system/$$p/bin/" && \
+		mkdir -p "$$D/bin/$$p" && \
 		cp bin/spruce/$$p/netplay.elf bin/spruce/$$p/netplay-broker.elf \
 		   bin/spruce/$$p/netplay-wifips.elf "$$D/bin/$$p/" && \
-		if [ "$$p" = my285 ]; then \
-			cp -R bin/spruce/my285/stubs "$$D/bin/my285/" || exit 1; \
-			continue; \
-		fi; \
+		if [ "$$p" = my285 ]; then continue; fi; \
 		mkdir -p "$$D/cores/override/$$p" && \
 		cp bin/$$p/netplay_shim.so "$$D/bin/$$p/" && \
 		cp "$(DRASTIC_RADIO)" "$$D/bin/$$p/libdrastic_wifi.so" && \
-		eval libs=\$$libs_$$p; sdk=$$p; [ "$$p" != my355 ] || sdk=h700; \
-		for l in $$libs; do cp -L "$(NEXTUI_SYSTEM)/$$sdk/lib/$$l" "$$D/bin/$$p/" || exit 1; done && \
 		cp dist/cores/$$p/gambatte_libretro.so dist/cores/$$p/gpsp_libretro.so \
 		   dist/cores-experimental/$$p/gambatte_dual_libretro.so "$$D/cores/override/$$p/" || exit 1; \
 		case " $(MGBA_PLATFORMS) " in *" $$p "*) \
@@ -808,12 +762,13 @@ dist-base: $(BASE_DIST_CHECKS)
 	@rm -rf "$(BASE_STAGE)" "$(BASE_ARCHIVE)"
 	@mkdir -p "$(BASE_STAGE)/$(PAK)/launcher" "$(BASE_STAGE)/$(PAK)/state" "$(BASE_STAGE)/$(PAK)/backup" dist
 
-	@cp pak.json pak_hints.json pak_onboarding.json "$(BASE_STAGE)/$(PAK)/"
-	@cp README.md "$(BASE_STAGE)/$(PAK)/" && cp -R docs "$(BASE_STAGE)/$(PAK)/"
+	@cp pak.json README.md "$(BASE_STAGE)/$(PAK)/"
 	@git rev-parse HEAD > "$(BASE_STAGE)/$(PAK)/SOURCE_COMMIT"
 	@cp launcher/nextui/pak-launch.sh "$(BASE_STAGE)/$(PAK)/launch.sh"
 	@launcher/flatten.sh nextui "$(BASE_STAGE)/$(PAK)/launcher"
 	@rm -f "$(BASE_STAGE)/$(PAK)/launcher/pak-launch.sh" "$(BASE_STAGE)/$(PAK)/launcher/session.conf.example"
+	@mv "$(BASE_STAGE)/$(PAK)/launcher/pak_hints.json" "$(BASE_STAGE)/$(PAK)/launcher/pak_onboarding.json" \
+	    "$(BASE_STAGE)/$(PAK)/"
 	@for p in $(VARNISH_PLATFORMS); do \
 		mkdir -p "$(BASE_STAGE)/$(PAK)/varnish"; \
 		cp -R dist/varnish/$$p "$(BASE_STAGE)/$(PAK)/varnish/$$p"; \
