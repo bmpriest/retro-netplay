@@ -97,7 +97,7 @@ echo
 echo "== armGBA link mode picks the shim path"
 printf 'role=host\nport=55993\n' > "$OUT/armgba.session"
 NETPLAY_REAL_CORE="$OUT/fake_libretro.so" NETPLAY_SESSION="$OUT/armgba.session" \
-	FAKE_CORE_NAME=armGBA NETPLAY_ARMGBA_LINK_MODE=separate \
+	FAKE_CORE_NAME=armGBA HARNESS_EXPECT_CORE_NAME=armGBA NETPLAY_ARMGBA_LINK_MODE=separate \
 	"$OUT/harness" "$SHIM" > "$OUT/armgba-separate" 2>&1 || {
 	cat "$OUT/armgba-separate"; echo "  MISS armGBA separate run"; fail=1
 }
@@ -106,7 +106,7 @@ grep -q "armGBA link mode=separate -> link-cable (Separate)" "$OUT/armgba-separa
 	&& echo "  ok   Separate carries the cable (link mode)" \
 	|| { echo "  MISS armGBA Separate"; cat "$OUT/armgba-separate"; fail=1; }
 NETPLAY_REAL_CORE="$OUT/fake_libretro.so" NETPLAY_SESSION="$OUT/armgba.session" \
-	FAKE_CORE_NAME=armGBA NETPLAY_ARMGBA_LINK_MODE=together \
+	FAKE_CORE_NAME=armGBA HARNESS_EXPECT_CORE_NAME=armGBA NETPLAY_ARMGBA_LINK_MODE=together \
 	"$OUT/harness" "$SHIM" > "$OUT/armgba-together" 2>&1 || {
 	cat "$OUT/armgba-together"; echo "  MISS armGBA together run"; fail=1
 }

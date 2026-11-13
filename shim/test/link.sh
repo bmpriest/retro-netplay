@@ -264,12 +264,14 @@ PORT20=$((PORT + 20))
 printf 'role=host\nport=%s\nmode=link\n'                  "$PORT20" > "$OUT/h20.session"
 printf 'role=client\nport=%s\npeer=127.0.0.1\nmode=link\n' "$PORT20" > "$OUT/c20.session"
 
-NETPLAY_LINK_STARVE_MS=500 \
+# Both ends armGBA, as in a real session: an armGBA guest waits for the
+# host's link options before it loads, and only an armGBA host sends them.
+NETPLAY_LINK_STARVE_MS=500 FAKE_CORE_NAME=armGBA HARNESS_EXPECT_CORE_NAME=armGBA \
 NETPLAY_REAL_CORE="$OUT/fake_libretro.so" NETPLAY_SESSION="$OUT/h20.session" \
 	"$OUT/harness" "$SHIM" 250 10 > "$OUT/h20.log" 2>&1 &
 H20=$!
 sleep 0.3
-NETPLAY_LINK_STARVE_MS=500 FAKE_CORE_NAME=armGBA FAKE_CORE_BLOCK_AT=100 FAKE_CORE_BLOCK_MS=1000 \
+NETPLAY_LINK_STARVE_MS=500 FAKE_CORE_NAME=armGBA HARNESS_EXPECT_CORE_NAME=armGBA FAKE_CORE_BLOCK_AT=100 FAKE_CORE_BLOCK_MS=1000 \
 NETPLAY_REAL_CORE="$OUT/fake_libretro.so" NETPLAY_SESSION="$OUT/c20.session" \
 	"$OUT/harness" "$SHIM" 250 10 > "$OUT/c20.log" 2>&1 &
 C20=$!
