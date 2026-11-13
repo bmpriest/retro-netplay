@@ -1,21 +1,19 @@
 {
   "name": "Netplay",
-  "version": "v4.0.0",
+  "version": "v1.0.0",
   "type": "TOOL",
   "description": "Two-player shared-screen, linked-console and DS local wireless multiplayer over LAN.",
   "author": "bmpriest",
+  "repo_url": "https://github.com/bmpriest/retro-netplay",
   "release_filename": "NextUI-Netplay-Complete.zip",
   "changelog": {
-    "v4.0.0": "RC2: Added Spruce support, retroarch compatibility, NDS support, various other changes. Check github for complete changelist.",
-    "v3.2.0-rc-1": "Improving h700 performance. Added experimental wifi power saving toggle.",
-    "v3.1.1-test": "Test build for different devices, including dual instance support for gambatte and mgba.",
-    "v2.1.0-test": "Instanced link play for Game Boy: both devices emulate both consoles and WiFi carries only controller inputs. Works with two different linked cartridges - Gold/Silver, Seasons/Ages - found inside a zipped library without transferring any game file. Cartridge real-time clocks are negotiated so each console keeps its own owner's time. Verified with a completed Pokemon trade across 13,500 frames with no desync.",
-    "v2.0.0-test": "Libretro shim, ad hoc networking, local compatibility-core fallback, bind-mounted pak wrapping, and WiFi recovery. Adds my282, my355 and h700."
+    "v1.0.0": "First official release. Play together on NextUI or Spruce devices. Check github for previous version notes."
   },
   "platforms": [
     "tg5040",
     "tg5050",
     "my282",
+    "my285",
     "my355",
     "h700"
   ]

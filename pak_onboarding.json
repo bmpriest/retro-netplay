@@ -14,7 +14,7 @@
     },
     {
       "title": "Two is better than one.",
-      "description": "Both Gambatte and mGBA support dual instances: emulating both devices on each device helps performance. Enable in settings for better performance and compatibility with GBA games."
+      "description": "Gambatte, mGBA and armGBA all support dual instances: emulating both devices on each device helps performance. Enabled if your device supports it."
     },
     {
       "title": "Compatibility cores",
