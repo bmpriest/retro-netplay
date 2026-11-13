@@ -4,12 +4,12 @@
 
 | Archive | Extraction location | Installed application |
 | --- | --- | --- |
-| NextUI-Netplay-Complete.zip | SD `Tools/<PLATFORM>/` | Netplay.pak/ |
+| NextUI-Netplay-Complete.zip | SD `Tools/<PLATFORM>/Netplay.pak/` (pak at the zip root, as the Pak Store installs it) | Netplay.pak/ |
 | Spruce-Netplay-Complete.zip | SD root | App/Netplay/ |
 
 NextUI includes all five platform builds, Varnish on its supported platforms,
 ordinary Gambatte/gpSP, both paired cores where built, MGBA.pak, DSP.pak, the
-supported NDS.pak base/radio overlay, and ARMv7/AArch64 compatibility cores.
+DraStic radio overlay (NDS.pak itself comes from the Pak Store), and ARMv7/AArch64 compatibility cores.
 Spruce includes four AArch64 builds, ordinary/paired cores, the DraStic radio,
 PyUI frontend/license, runtime libraries and AArch64 compatibility cores. It
 uses Spruce's installed RetroArch and DS emulators rather than installing

@@ -1235,7 +1235,7 @@ static void ds_row_action(NS_ManagedPak k, const CoreState* st) {
 		snprintf(status, sizeof(status), "This NDS.pak's DraStic build is not supported.");
 		return;
 	} else if (!pak_status.base_installed && !pak_status.base_bundled) {
-		snprintf(status, sizeof(status), "Install NDS.pak (DraStic) first.");
+		snprintf(status, sizeof(status), "Install NDS from the Pak Store first.");
 		return;
 	}
 	prompt_sel = 0;

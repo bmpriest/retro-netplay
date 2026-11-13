@@ -10,9 +10,9 @@ house access point. Internet matchmaking is not implemented.
 
 Back up your SD card before installing or updating.
 
-- **NextUI:** extract `NextUI-Netplay-Complete.zip` into
-  `Tools/<PLATFORM>/` on the SD card. The result is
-  `Tools/<PLATFORM>/Netplay.pak/launch.sh`.
+- **NextUI:** install Netplay from the Pak Store, or extract
+  `NextUI-Netplay-Complete.zip` into a new `Tools/<PLATFORM>/Netplay.pak/`
+  folder on the SD card. The result is `Tools/<PLATFORM>/Netplay.pak/launch.sh`.
 - **Spruce:** extract `Spruce-Netplay-Complete.zip` at the SD-card root.
   The result is `App/Netplay/launch.sh`. Use a Spruce version providing PyUI's
   device classes and runtime for your handheld.
@@ -75,8 +75,9 @@ On NextUI, choose Gambatte Dual under **Configuration > Cores > Base > GB/GBC**.
 Instanced mGBA is under **Extras > MGBA** and installs the bundled MGBA.pak.
 Use `Roms/Game Boy Advance (MGBA)` and `Saves/MGBA` for that pak.
 DSP.pak installs from the Extras list, with games in `Roms/Nintendo DS (DSP)`.
-The current Complete release also bundles the supported NDS.pak base and
-DraStic radio overlay; games use `Roms/Nintendo DS (NDS)`. Managed replacements
+DraStic local wireless is an overlay for NDS.pak: install NDS from the Pak
+Store first, then add local wireless under Extras; games use
+`Roms/Nintendo DS (NDS)`. Managed replacements
 have backup/removal controls. Unsupported DraStic binaries cannot use the hook.
 
 Spruce has one combined **Cores** list and uses its installed emulator choices.

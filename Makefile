@@ -574,11 +574,12 @@ check-dsp:
 NDS_PLATFORMS  := tg5040 tg5050 h700
 NDS_OVERLAY    := dist/nds
 DRASTIC_SHA256 := 6e11511907f2188863f68434484d8e1fb70c6c4b597512bed02d38f60370ac11
-# For a card with no NDS.pak, Netplay installs minui-nintendo-ds-pak's own
-# release, unmodified, then adds the overlay. Its DraStic is DRASTIC_SHA256.
-NDS_BASE_URL    := https://github.com/josegonzalez/minui-nintendo-ds-pak/releases/download/0.14.1/NDS.pak.zip
-NDS_BASE_ZIP    := .cache/nds/NDS-0.14.1.pak.zip
-NDS_BASE_SHA256 := ac4c957592e0856cb4c559cb8a9c29795baec961a789d2e4edcf26cbf06a9a65
+# NDS.pak itself comes from the Pak Store (minui-nintendo-ds-pak) and is not
+# shipped. Its release is fetched here only to check that its DraStic is still
+# DRASTIC_SHA256 (0.14.1 through 0.15.1 are).
+NDS_BASE_URL    := https://github.com/josegonzalez/minui-nintendo-ds-pak/releases/download/0.15.1/NDS.pak.zip
+NDS_BASE_ZIP    := .cache/nds/NDS-0.15.1.pak.zip
+NDS_BASE_SHA256 := 3d72074a157e992e642014d05e44fa163744b21fc2fbcd784c731c55beb6ab68
 
 $(NDS_BASE_ZIP):
 	@mkdir -p $(dir $@)
@@ -588,11 +589,9 @@ $(NDS_BASE_ZIP):
 
 cores-nds: drastic-radio $(NDS_BASE_ZIP)
 	@printf '%s  %s\n' "$(NDS_BASE_SHA256)" "$(NDS_BASE_ZIP)" | sha256sum -c - >/dev/null
-	@rm -rf "$(NDS_OVERLAY)/base" && mkdir -p "$(NDS_OVERLAY)/base/NDS.pak"
-	@unzip -q "$(NDS_BASE_ZIP)" -d "$(NDS_OVERLAY)/base/NDS.pak"
-	@test "$$(sha256sum $(NDS_OVERLAY)/base/NDS.pak/drastic/drastic | cut -d' ' -f1)" = "$(DRASTIC_SHA256)" || { \
+	@rm -rf "$(NDS_OVERLAY)/base"
+	@test "$$(unzip -p "$(NDS_BASE_ZIP)" drastic/drastic | sha256sum | cut -d' ' -f1)" = "$(DRASTIC_SHA256)" || { \
 		echo "NDS.pak release carries a different DraStic" >&2; exit 1; }
-	@printf "   %-7s %s\n" base "$$(du -sh $(NDS_OVERLAY)/base | cut -f1)"
 	@for p in $(NDS_PLATFORMS); do \
 		rm -rf "$(NDS_OVERLAY)/$$p"; \
 		mkdir -p "$(NDS_OVERLAY)/$$p/NDS.pak/drastic/libs"; \
@@ -607,7 +606,6 @@ check-nds:
 	@for p in $(NDS_PLATFORMS); do \
 		test -f "$(NDS_OVERLAY)/$$p/NDS.pak/drastic/libs/libdrastic_wifi.so" || { echo "missing NDS overlay $$p - run 'make cores-nds' first"; exit 1; }; \
 	done
-	@test -f "$(NDS_OVERLAY)/base/NDS.pak/drastic/drastic" || { echo "missing bundled NDS.pak - run 'make cores-nds' first"; exit 1; }
 
 app:
 	@for p in $(PLATFORMS); do \
@@ -855,9 +853,6 @@ dist-base: $(BASE_DIST_CHECKS)
 		mkdir -p "$(BASE_STAGE)/$(PAK)/cores/nds"; \
 		cp -R "$(NDS_OVERLAY)/$$p" "$(BASE_STAGE)/$(PAK)/cores/nds/"; \
 	done
-	@cp -R "$(NDS_OVERLAY)/base" "$(BASE_STAGE)/$(PAK)/cores/nds/"
-	@chmod 755 "$(BASE_STAGE)/$(PAK)/cores/nds/base/NDS.pak/launch.sh" \
-		"$(BASE_STAGE)/$(PAK)/cores/nds/base/NDS.pak/drastic/drastic"
 	@for p in $(PLATFORMS); do \
 		mkdir -p "$(BASE_STAGE)/$(PAK)/bin/$$p"; \
 		cp bin/$$p/netplay_shim.so "$(BASE_STAGE)/$(PAK)/bin/$$p/"; \
@@ -871,7 +866,7 @@ dist-base: $(BASE_DIST_CHECKS)
 	done
 	@chmod 755 "$(BASE_STAGE)/$(PAK)/launch.sh" "$(BASE_STAGE)/$(PAK)/launcher"/*
 	@find "$(BASE_STAGE)" -name '.DS_Store' -delete
-	@cd "$(BASE_STAGE)" && zip -q -r "../Netplay.pak.zip" "$(PAK)" -x '*/.*'
+	@cd "$(BASE_STAGE)/$(PAK)" && zip -q -r "$(abspath $(BASE_ARCHIVE))" . -x '.*' '*/.*'
 
 dist-compatibility: check-compatibility
 	@rm -rf "$(COMPAT_STAGE)" "$(COMPAT_ARCHIVE)"
@@ -879,7 +874,7 @@ dist-compatibility: check-compatibility
 	@cp -R dist/compatibility/armv7 dist/compatibility/aarch64 \
 		"$(COMPAT_STAGE)/$(PAK)/cores/compatibility/"
 	@cp cores/compatibility-platforms.txt "$(COMPAT_STAGE)/$(PAK)/cores/compatibility/PLATFORMS.txt"
-	@cd "$(COMPAT_STAGE)" && zip -q -r "../compatibility-cores.zip" "$(PAK)" -x '*/.*'
+	@cd "$(COMPAT_STAGE)/$(PAK)" && zip -q -r "$(abspath $(COMPAT_ARCHIVE))" . -x '.*' '*/.*'
 
 dist-full: dist-base check-compatibility
 	@rm -rf "$(FULL_STAGE)" "$(FULL_ARCHIVE)"
@@ -888,7 +883,7 @@ dist-full: dist-base check-compatibility
 	@cp -R dist/compatibility/armv7 dist/compatibility/aarch64 \
 		"$(FULL_STAGE)/$(PAK)/cores/compatibility/"
 	@cp cores/compatibility-platforms.txt "$(FULL_STAGE)/$(PAK)/cores/compatibility/PLATFORMS.txt"
-	@cd "$(FULL_STAGE)" && zip -q -r "$(abspath $(FULL_ARCHIVE))" "$(PAK)" -x '*/.*'
+	@cd "$(FULL_STAGE)/$(PAK)" && zip -q -r "$(abspath $(FULL_ARCHIVE))" . -x '.*' '*/.*'
 
 check-netplay-cores:
 	@for p in $(PLATFORMS); do for c in gambatte gpsp; do \

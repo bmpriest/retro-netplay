@@ -13,7 +13,7 @@ COMPAT = ('fceumm', 'picodrive', 'snes9x', 'mednafen_supafaust', 'pcsx_rearmed',
 
 
 def check(path, spruce):
-    prefix = 'App/Netplay/' if spruce else 'Netplay.pak/'
+    prefix = 'App/Netplay/' if spruce else ''
     platforms = ('tg5040', 'tg5050', 'my355', 'h700') if spruce else ('tg5040', 'tg5050', 'my282', 'my355', 'h700')
     with zipfile.ZipFile(path) as archive:
         assert archive.testzip() is None, 'ZIP CRC failure'
@@ -22,8 +22,7 @@ def check(path, spruce):
         assert len(names) == len(archive.infolist()), 'duplicate ZIP entries'
         for name in names:
             assert '..' not in Path(name).parts, name
-            bundled_bios = name.startswith(prefix + 'cores/nds/base/NDS.pak/drastic/system/') and Path(name).name in ('drastic_bios_arm7.bin', 'drastic_bios_arm9.bin', 'nds_bios_arm7.bin', 'nds_bios_arm9.bin', 'nds_firmware.bin')
-            assert bundled_bios or not name.endswith(('.gba', '.gb', '.gbc', '.nds', '.sfc', '.nes', '.cue', '.bin')), f'unexpected ROM payload: {name}'
+            assert not name.endswith(('.gba', '.gb', '.gbc', '.nds', '.sfc', '.nes', '.cue', '.bin')), f'unexpected ROM payload: {name}'
             assert '__pycache__' not in name and not name.endswith(('.pyc', '.log')), f'development artifact: {name}'
             assert Path(name).name not in ('session', 'settings', 'rig.conf', 'rig.json'), f'mutable fixture state: {name}'
         def require(relative, executable=False):
@@ -64,13 +63,15 @@ def check(path, spruce):
             require('spruce_ui/CHEEVOS-LICENSE')
             require('spruce_ui/footer.py')
             config = json.loads(require('config.json'))
-            assert set(config['devices']) == {'TRIMUI_A133P', 'TRIMUI_SMART_PRO_S', 'MIYOO_FLIP', 'ANBERNIC_RGXX', 'RGB30', 'RGB20SX', 'MINILOONG_POCKET1'}
+            assert set(config['devices']) == {'TRIMUI_A133P', 'TRIMUI_SMART_PRO_S', 'MIYOO_FLIP', 'MIYOO_A30', 'MIYOO_MINI_FAMILY', 'ANBERNIC_RGXX', 'DARKMOSS'}
             for platform in platforms:
                 elf(f'bin/{platform}/libdrastic_wifi.so', platform)
                 for name in ('libsamplerate.so.0', 'libzip.so.5'):
                     require(f'bin/{platform}/{name}')
         else:
-            require('cores/nds/base/NDS.pak/drastic/drastic', True)
+            # DraStic comes from the Pak Store's NDS.pak; only the overlay ships.
+            assert not any(name.startswith('cores/nds/base/') for name in names), 'DraStic is bundled'
+            assert not any(name.startswith('Netplay.pak/') for name in names), 'NextUI archive has a wrapper folder'
             for platform in ('tg5040', 'tg5050', 'h700'):
                 require(f'cores/dsp/{platform}/DSP.pak/{platform}/dsperate', True)
                 require(f'cores/nds/{platform}/NDS.pak/drastic/libs/libdrastic_wifi.so')

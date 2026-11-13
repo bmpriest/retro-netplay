@@ -87,7 +87,7 @@
       "ready": "Local wireless: a DS each. Press A to remove.",
       "present": "No local wireless yet. Press A to add it.",
       "unsupported": "This DraStic build is not one Netplay supports.",
-      "absent": "Press A to install NDS.pak (DraStic).",
+      "absent": "Install NDS from the Pak Store, then add local wireless here.",
       "unavailable": "DraStic local wireless is not built for this device."
     },
     "SEGACD": {
