@@ -30,7 +30,9 @@ game)
 		[ -f "$cmdline" ] || continue
 		args=$(tr '\0' ' ' < "$cmdline" 2>/dev/null) || continue
 		case $args in
-		*RetroArch*|*minarch*|*retroarch*)
+		# The DS emulators run standalone: DSperate (spruce's NDS default,
+		# NextUI's DSP.pak) and DraStic.
+		*RetroArch*|*minarch*|*retroarch*|*dsperate*|*drastic*)
 			case $args in
 			*"$ROM"*) echo "sync: running $ROM"; exit 0 ;;
 			esac

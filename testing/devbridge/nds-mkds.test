@@ -14,7 +14,9 @@
 
 all:WAIT_FOR devbridge 30000
 host:OPEN_GAME NDS "Nintendo DS (NDS)/mariokart.nds"
-guest:OPEN_GAME DSP "Nintendo DS (DSP)/mariokart.nds"
+guest:OPEN_GAME DSP "Nintendo DS (DSP)/mariokart.nds" # not-spruce
+# spruce has no DSP system: its NDS launcher runs Netplay's DSperate.
+#spruce guest:OPEN_GAME NDS "Nintendo DS (NDS)/mariokart.nds"
 all:WAIT_FOR game 30000
 
 WAIT 10000

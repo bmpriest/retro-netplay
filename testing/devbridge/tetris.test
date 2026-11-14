@@ -27,7 +27,10 @@ guest:TRM sh {helpers}/keys.sh --bg a+b+start+select:0.4:4 right:0.2:0.4 right:0
 # RG35XXH), so no soft reset there: B leaves the demo for the title and does
 # nothing on the title itself.
 #spruce host:TRM sh {helpers}/keys.sh --bg b:0.3:2 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 start:0.3:0
-#spruce guest:TRM sh {helpers}/keys.sh --bg b:0.3:2 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 sleep:0.6 start:0.3:0
+# The host's line takes ~7.1 s to its START (4.4 s soft reset), spruce's
+# ~5.6 s without the sleep: the guest must press second, or Tetris's master
+# sits on its music screen waiting for a slave that never answers.
+#spruce guest:TRM sh {helpers}/keys.sh --bg b:0.3:2 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 right:0.2:0.4 sleep:2.2 start:0.3:0
 WAIT 9000
 
 # These screens are static and match exactly (difference 0.00), so a tight
@@ -39,8 +42,8 @@ WAIT 9000
 host:VERIFY_WAIT {host_refs}/tetris-music.png 20000 threshold=5
 guest:VERIFY_WAIT {guest_refs}/tetris-music.png 20000 threshold=5
 
-host:TRM sh {helpers}/keys.sh start:0.3:3
-host:VERIFY_WAIT {host_refs}/tetris-vs-host.png 20000 threshold=5
+# Pressed until the VS screen shows, so one lost press does not end the test.
+host:VERIFY_UNTIL {host_refs}/tetris-vs-host.png 24000 every=4000 threshold=5 :: sh {helpers}/keys.sh start:0.3:0
 guest:VERIFY_WAIT {guest_refs}/tetris-vs-guest.png 20000 threshold=5
 
 # Different heights, chosen by each player on their own console.

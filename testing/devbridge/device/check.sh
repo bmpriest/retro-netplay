@@ -101,6 +101,15 @@ if grep -q '^protocol=retroarch$' /mnt/SDCARD/Saves/netplay/session 2>/dev/null;
     exit 0
 fi
 
+# The session picks the engine (docs/engine-matrix.md), not the test: a GBA
+# link test runs gpSP's networked link against some peers and mGBA Dual's
+# paired consoles against others (a NextUI Brick with MGBA.pak). Judge
+# what actually ran.
+if [ "$MODE" = link ] && grep -q 'instanced link agreed by both devices' "$log"; then
+	echo "session ran paired consoles (instanced), judged as such"
+	MODE=instanced
+fi
+
 case $MODE in
 shared)
 	grep -q 'ROM and core identity match peer' "$log" || fail "peers never agreed on ROM and core"
