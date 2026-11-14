@@ -666,6 +666,10 @@ static const char* const host_decided_options[] = {
 	"pcsx_rearmed_memcard2", "pcsx_rearmed_multitap",
 	"pcsx_rearmed_analog_axis_modifier", "pcsx_rearmed_analog_combo",
 	"pcsx_rearmed_input_sensitivity",
+	/* The SPU writes its voice output back into SPU RAM (the capture
+	 * buffers), so this is emulation, not just sound: NextUI's simple
+	 * against spruce's gaussian desynced Crash Team Racing at every check. */
+	"pcsx_rearmed_spu_interpolation",
 	"gambatte_gb_hwmode", "gambatte_up_down_allowed", "gambatte_turbo_period",
 	"gpsp_boot_mode", "gpsp_rtc", "gpsp_rtc_time_source", "gpsp_turbo_period",
 	"mgba_gb_model", "mgba_idle_optimization", "mgba_allow_opposing_directions",
@@ -1533,7 +1537,52 @@ static void shim_netpacket_poll_receive(void) {
 
 static const char* dual_core_option(const char* key);
 
+static bool shim_environment_answer(unsigned cmd, void* data);
+
+/* Diagnosis, with /tmp/netplay-dump-checks present: every option value the
+ * core reads, once per key and value, so two devices' runs can be diffed. */
 static bool shim_environment(unsigned cmd, void* data) {
+	bool ok = shim_environment_answer(cmd, data);
+	static int dump = -1;
+	if (dump < 0) dump = access("/tmp/netplay-dump-checks", F_OK) == 0;
+	if (dump && cmd != RETRO_ENVIRONMENT_GET_VARIABLE) {
+		/* Every other query once per command and answer; for the ones that
+		 * return a plain int or bool, the value too. */
+		static char seen_cmd[8192];
+		char line[96];
+		int value = -1;
+		if (ok && data && (cmd == RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE ||
+		                   cmd == RETRO_ENVIRONMENT_GET_INPUT_BITMASKS ||
+		                   cmd == RETRO_ENVIRONMENT_GET_FASTFORWARDING ||
+		                   cmd == RETRO_ENVIRONMENT_GET_SAVESTATE_CONTEXT ||
+		                   cmd == RETRO_ENVIRONMENT_GET_LANGUAGE ||
+		                   cmd == RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION ||
+		                   cmd == RETRO_ENVIRONMENT_GET_INPUT_MAX_USERS ||
+		                   cmd == RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER))
+			value = *(int*)data;
+		snprintf(line, sizeof(line), "|%u:%d:%d|", cmd & 0xffff, ok ? 1 : 0, value);
+		if (!strstr(seen_cmd, line) && strlen(seen_cmd) + strlen(line) < sizeof(seen_cmd)) {
+			strcat(seen_cmd, line);
+			shim_log("env read: cmd %u%s ok=%d value=%d\n", cmd & 0xffff,
+			         cmd & RETRO_ENVIRONMENT_EXPERIMENTAL ? " (experimental)" : "", ok ? 1 : 0, value);
+		}
+	}
+	if (dump && cmd == RETRO_ENVIRONMENT_GET_VARIABLE && data) {
+		const struct retro_variable* var = data;
+		static char seen[16384];
+		char line[192];
+		snprintf(line, sizeof(line), "|%s=%s|", var->key ? var->key : "?",
+		         ok && var->value ? var->value : "(none)");
+		if (!strstr(seen, line) && strlen(seen) + strlen(line) < sizeof(seen)) {
+			strcat(seen, line);
+			shim_log("option read: %s=%s\n", var->key ? var->key : "?",
+			         ok && var->value ? var->value : "(none)");
+		}
+	}
+	return ok;
+}
+
+static bool shim_environment_answer(unsigned cmd, void* data) {
 	if (cmd == RETRO_ENVIRONMENT_SET_NETPACKET_INTERFACE) {
 		// Only claim to support this when we can actually back it. With no
 		// session armed we forward to the frontend, which says no - so a
@@ -3190,6 +3239,15 @@ static bool netplay_checkDivergence(void) {
 		size_t snapshot_len = 0;
 		uint32_t mine = 0;
 		if (!capture_state(&snapshot, &snapshot_len, &mine)) return false;
+		/* Diagnosis: with /tmp/netplay-dump-checks present, keep the exact bytes
+		 * each side hashed, to diff a desync down to the field. */
+		if (access("/tmp/netplay-dump-checks", F_OK) == 0) {
+			char dump[96];
+			snprintf(dump, sizeof(dump), "/tmp/netplay-check-%s-%u.state",
+			         NetLink_getRole() == NETLINK_ROLE_HOST ? "host" : "guest", netplay_frame);
+			FILE* df = fopen(dump, "wb");
+			if (df) { fwrite(snapshot, 1, snapshot_len, df); fclose(df); }
+		}
 		if (NetLink_getRole() == NETLINK_ROLE_HOST) {
 			if (netplay_frame == 0) shim_log("state at frame 0: %08x\n", mine);
 			set_checkpoint_candidate(snapshot, snapshot_len, netplay_frame, mine);
