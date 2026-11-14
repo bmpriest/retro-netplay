@@ -27,6 +27,11 @@ WAIT 12000
 # WiFi) is never sampled by the game.
 host:TRM sh {helpers}/keys.sh start:0.3:2.5 start:0.3:0
 host:VERIFY_WAIT {host_refs}/sor2-menu.png 20000
+# The menu matches (about 9 against the threshold of 10) while it is still
+# fading in, and the game ignores presses until the fade ends. Over WiFi the
+# input delay kept the game behind the script; over a USB cable (delay 2) the
+# Down landed during the fade and the cursor stayed on 1 PLAYER.
+WAIT 1500
 host:TRM sh {helpers}/keys.sh down:0.3:0.8 start:0.3:3
 host:VERIFY_WAIT {host_refs}/sor2-select.png 20000
 guest:VERIFY_WAIT {guest_refs}/sor2-select.png 20000
