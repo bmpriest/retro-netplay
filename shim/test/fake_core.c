@@ -175,7 +175,10 @@ void retro_get_system_av_info(struct retro_system_av_info* info) {
 	info->timing.sample_rate    = 44100.0;
 }
 
-void retro_set_controller_port_device(unsigned port, unsigned device) { HIT("set_controller_port_device"); }
+void retro_set_controller_port_device(unsigned port, unsigned device) {
+	HIT("set_controller_port_device");
+	printf("core:device port=%u dev=%u\n", port, device);
+}
 void retro_reset(void) {
 	HIT("reset");
 	memset(state_blob, 0xC3, sizeof(state_blob));

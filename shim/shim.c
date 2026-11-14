@@ -3661,8 +3661,40 @@ void retro_get_system_av_info(struct retro_system_av_info* info) {
 	if (info->geometry.base_height)     av_base_height = info->geometry.base_height;
 }
 
+/* Shared screen emulates one console on both devices, so the controllers
+ * plugged into it must be the same too. Frontends choose them on their own:
+ * NextUI's minarch plugs a DualShock into PCSX-ReARMed, spruce's RetroArch
+ * leaves the standard pad, and a game that probes the pad then runs
+ * differently. The synced input carries buttons only (analog reads neutral),
+ * so both players get the standard pad, whatever either frontend asks for. */
+static bool same_controllers(void) {
+	return session_active && netplay_mode && !ra_mode && !dual_link_mode;
+}
+
+static bool controllers_fixed;
+
+static void force_same_controllers(void) {
+	if (!same_controllers() || !core.set_controller_port_device) return;
+	for (unsigned port = 0; port < 2; port++)
+		core.set_controller_port_device(port, RETRO_DEVICE_JOYPAD);
+	controllers_fixed = true;
+	shim_log("both players use the standard pad on ports 1-2 (shared screen)\n");
+}
+
 void retro_set_controller_port_device(unsigned port, unsigned device) {
 	if (!core.handle) return;
+	if (same_controllers() && port < 2) {
+		/* Once the game is loaded, the pads stay as set. Even a request for
+		 * the pad already plugged in makes PCSX-ReARMed reinitialise it, and
+		 * a frontend sends one whenever a joypad is (re)connected - on one
+		 * device only, and at any frame. */
+		if (controllers_fixed) {
+			shim_log("frontend asked for device %u on port %u during the session; ignored\n",
+			         device, port + 1);
+			return;
+		}
+		device = RETRO_DEVICE_JOYPAD;
+	}
 	core.set_controller_port_device(port, device);
 }
 
@@ -5639,6 +5671,7 @@ bool retro_load_game(const struct retro_game_info* game) {
 	                    (netplay_mode || dual_link_mode || armgba_session);
 	if (host_decides && NetLink_getRole() == NETLINK_ROLE_CLIENT) guest_options_before_load();
 	bool loaded = core.load_game(game);
+	if (loaded) force_same_controllers();
 	if (loaded && host_decides) host_options_publish();
 	return loaded;
 }

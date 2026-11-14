@@ -234,6 +234,9 @@ int main(int argc, char** argv) {
 	// another, while the session is already connected.
 	if (getenv("HARNESS_LOAD_DELAY_MS")) usleep(atoi(getenv("HARNESS_LOAD_DELAY_MS")) * 1000);
 	CHECK(load_game(&game) == true, "load_game did not forward its return value");
+	// Like minarch with PCSX-ReARMed: the frontend plugs a DualShock (517)
+	// into the first port, here after loading, as a joypad hot-plug does.
+	set_controller_port_device(0, 517);
 
 	struct retro_system_av_info av;
 	memset(&av, 0, sizeof(av));
