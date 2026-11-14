@@ -447,12 +447,27 @@ def host() -> None:
     if status.get("can_host_adhoc") == "1":
         choices.append(("adhoc", "Create ad hoc network", "Fast local connection", ""))
     choices.append(("wifi", "Host over WiFi", "Use the current network", ""))
+    if status.get("can_cable") == "1":
+        choices.append(("cable", "Host over USB cable",
+                        "Top socket to the other device's bottom socket", ""))
     choice = menu("Host", choices)
     if choice:
         attempt("Hosting", "Checking and starting session", "host", choice[0])
 
 
 def join() -> None:
+    if fields(control("status")).get("can_cable") == "1":
+        choice = menu("Join", [
+            ("find", "Find hosts", "WiFi and ad hoc", ""),
+            ("cable", "Join over USB cable",
+             "Top socket to the other device's bottom socket; both players choose USB cable", ""),
+        ])
+        if choice is None:
+            return
+        if choice[0] == "cable":
+            attempt("Joining", "Linking over the USB cable and looking for the host",
+                    "join", "cable", "30")
+            return
     while True:
         if not join_once():
             return
@@ -772,6 +787,8 @@ def main_menu() -> bool:
     status = fields(control("status"))
     if status.get("armed") == "1":
         detail = "Hosting" if status.get("role") == "host" else "Joined " + status.get("host", "")
+        if status.get("cable", "off") != "off":
+            detail += " · USB cable " + status["cable"]
         rows = [("session", "Session status", detail, ""),
                 ("end", "End session", "Return to normal play", ""),
                 ("config", "Configuration", "", "")]

@@ -211,6 +211,7 @@ void NC_abortArm(bool may_have_activated) {
 		NS_disarm();
 	else
 		NS_hotspotStop();
+	NS_cableStop();
 	hosting_hotspot = 0;
 }
 
@@ -306,15 +307,16 @@ NC_ArmResult NC_arm(NS_Role role, const char* peer) {
 	}
 
 	int adhoc = NS_hotspotActive();
+	/* The same test NS_arm used for the floor it wrote. */
+	bool cable = role == NS_ROLE_HOST ? NS_cableRunning()
+	           : peer && (!strcmp(peer, NS_CABLE_HOST_IP) || !strcmp(peer, NS_CABLE_CLIENT_IP));
+	const char* link = cable ? "USB cable" : adhoc ? "ad hoc" : "WiFi";
+	int delay = cable ? NS_INPUT_DELAY_CABLE : adhoc ? NS_INPUT_DELAY_ADHOC : NS_INPUT_DELAY_WIFI;
 	if (role == NS_ROLE_HOST)
 		snprintf(status, sizeof(status), "Hosting on %s  -  %s%s, delay %d",
-		         local_ip, adhoc ? "ad hoc" : "WiFi",
-		         protocol == NS_PROTO_RETROARCH ? " (RetroArch)" : "",
-		         adhoc ? NS_INPUT_DELAY_ADHOC : NS_INPUT_DELAY_WIFI);
+		         local_ip, link, protocol == NS_PROTO_RETROARCH ? " (RetroArch)" : "", delay);
 	else
-		snprintf(status, sizeof(status), "Joined %s  -  %s, delay %d%s",
-		         peer, adhoc ? "ad hoc" : "WiFi",
-		         adhoc ? NS_INPUT_DELAY_ADHOC : NS_INPUT_DELAY_WIFI, core_note);
+		snprintf(status, sizeof(status), "Joined %s  -  %s, delay %d%s", peer, link, delay, core_note);
 	return NC_ARM_OK;
 }
 
@@ -459,6 +461,10 @@ static void ctl_print_status(void) {
 	if (!NS_localIP(ip, sizeof(ip))) snprintf(ip, sizeof(ip), "none");
 	printf("ip=%s\n", ip);
 	printf("can_host_adhoc=%d\n", NS_canHostAdhoc() ? 1 : 0);
+	printf("can_cable=%d\n", NS_canCable() ? 1 : 0);
+	char cable_detail[96];
+	printf("cable=%s\n", NS_cableState(cable_detail, sizeof(cable_detail)));
+	if (cable_detail[0]) printf("cable_error=%s\n", cable_detail);
 	printf("powersave_off=%d\n", NS_settings()->disable_powersave ? 1 : 0);
 	printf("adhoc_switch=%d\n", NS_settings()->adhoc_switch ? 1 : 0);
 	if (!NS_sessionInfo(&si)) { printf("armed=0\n"); return; }
@@ -520,6 +526,7 @@ int NC_ctlMain(int argc, char* argv[]) {
 	if (strcmp(cmd, "cores") && strcmp(cmd, "core-option")) {
 		NS_cleanupStaleSession();
 		NS_wifiRecoverIfStranded();
+		NS_cableRecover();
 		if (!NS_localIP(local_ip, sizeof(local_ip))) snprintf(local_ip, sizeof(local_ip), "no network");
 	}
 
@@ -668,8 +675,9 @@ int NC_ctlMain(int argc, char* argv[]) {
 
 	if (!strcmp(cmd, "host")) {
 		bool adhoc = !strcmp(arg, "adhoc");
-		if (!adhoc && strcmp(arg, "wifi")) {
-			snprintf(status, sizeof(status), "host wifi|adhoc");
+		bool cable = !strcmp(arg, "cable");
+		if (!adhoc && !cable && strcmp(arg, "wifi")) {
+			snprintf(status, sizeof(status), "host wifi|adhoc|cable");
 			return ctl_result(false);
 		}
 		if (NS_isArmed()) {
@@ -692,6 +700,9 @@ int NC_ctlMain(int argc, char* argv[]) {
 			NS_hotspotStop();
 			NS_announceHotspot(NULL, NULL);
 		}
+		if (cable && !NS_cableStart(status, sizeof(status)))
+			return ctl_result(false);
+		if (!cable) NS_cableStop();
 		status[0] = '\0';
 		NS_setArmProtocol(protocol_arg ? (!strcmp(protocol_arg, "retroarch") ? NS_PROTO_RETROARCH
 		                                                                     : NS_PROTO_LINKPLAY)
@@ -709,7 +720,33 @@ int NC_ctlMain(int argc, char* argv[]) {
 		NS_Peer peer;
 		memset(&peer, 0, sizeof(peer));
 		bool discover = !strcmp(arg, "discover");
-		if (discover || !strcmp(arg, "adhoc")) {
+		if (!strcmp(arg, "cable")) {
+			/* Join > USB cable: bring the link up, then take the first host
+			 * that announces itself over it. */
+			int secs = argc > 2 ? atoi(argv[2]) : 30;
+			if (secs < 5) secs = 5;
+			if (!NS_cableStart(status, sizeof(status))) return ctl_result(false);
+			NS_Peer found[NS_MAX_PEERS];
+			bool got = false;
+			NS_discoverStart();
+			for (int t = 0; t < secs * 10 && !got; t++) {
+				int n = NS_discoverTick(found, NS_MAX_PEERS);
+				for (int i = 0; i < n && !got; i++)
+					if (found[i].cable) { peer = found[i]; got = true; }
+				if (!got) usleep(100000);
+			}
+			NS_discoverStop();
+			if (!got) {
+				char detail[96];
+				const char* state = NS_cableState(detail, sizeof(detail));
+				snprintf(status, sizeof(status), "%s",
+				         !strcmp(state, "linked") ? "cable linked, but no host is armed on the other device"
+				         : !strcmp(state, "failed") ? "the cable link failed; see cable.log"
+				         : "no device on the cable - check it joins a top socket to a bottom one");
+				NS_cableStop();
+				return ctl_result(false);
+			}
+		} else if (discover || !strcmp(arg, "adhoc")) {
 			/* As the Join list finds hosts: by their LAN announcement, and
 			 * by scanning for Netplay ad hoc networks - the only way to find
 			 * a host whose own house WiFi has dropped. Tests run one host at
@@ -743,7 +780,7 @@ int NC_ctlMain(int argc, char* argv[]) {
 		} else if (arg[0]) {
 			snprintf(peer.ip, sizeof(peer.ip), "%s", arg);
 		} else {
-			snprintf(status, sizeof(status), "join IP|adhoc|discover [SECONDS]");
+			snprintf(status, sizeof(status), "join IP|adhoc|discover|cable [SECONDS]");
 			return ctl_result(false);
 		}
 

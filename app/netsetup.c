@@ -70,6 +70,7 @@ static char joined_ssid[NS_SSID_LEN];  /* recorded into the session so the */
 static char joined_psk[NS_PSK_LEN];    /* launch stub can rejoin per game */
 static NS_ProgressFn ns_progress;      /* lets the UI animate a blocking join */
 static bool file_exists(const char* p);
+static void ns_log(const char* fmt, ...);
 static bool hotspot_processes_alive(void);
 
 /* Everything that differs per platform lives in launcher/wifi-platform.sh, and
@@ -219,38 +220,50 @@ const char* NS_pakPath(void)  { return ns_pak; }
 const char* NS_sdPath(void)   { return ns_sd; }
 const char* NS_statePath(void) { return ns_state; }
 
-bool NS_cablePeer(char* out, int len) {
-	if (!out || len <= 0) return false;
-	out[0] = '\0';
-	char path[512], body[CP_STATUS_MAX + 1], pid_text[32];
+/* The running cable daemon's pid, or 0. The pid file alone is not enough: a
+ * daemon killed with SIGKILL leaves it (and a status saying "up") behind. */
+static long cable_pid(void) {
+	char path[512], pid_text[32];
 	snprintf(path, sizeof(path), "%s/%s", ns_state, CP_PID_FILE);
 	FILE* f = fopen(path, "r");
-	if (!f) return false;
+	if (!f) return 0;
 	bool pid_ok = fgets(pid_text, sizeof(pid_text), f) != NULL;
 	fclose(f);
-	if (!pid_ok) return false;
+	if (!pid_ok) return 0;
 	char* end;
 	long pid = strtol(pid_text, &end, 10);
-	if (pid <= 1 || (*end && *end != '\n') || kill((pid_t)pid, 0) != 0) return false;
+	if (pid <= 1 || (*end && *end != '\n') || kill((pid_t)pid, 0) != 0) return 0;
 	char proc[64], command[256];
 	snprintf(proc, sizeof(proc), "/proc/%ld/cmdline", pid);
 	f = fopen(proc, "r");
-	if (!f) return false;
+	if (!f) return 0;
 	size_t cmd_len = fread(command, 1, sizeof(command) - 1, f);
 	fclose(f);
 	command[cmd_len] = '\0';
-	if (!strstr(command, "netplay-cable.elf")) return false;
+	return strstr(command, "netplay-cable.elf") ? pid : 0;
+}
+
+/* The live daemon's status record, parsed. */
+static bool cable_status(CP_Status* s) {
+	char path[512], body[CP_STATUS_MAX + 1];
+	if (!cable_pid()) return false;
 	snprintf(path, sizeof(path), "%s/%s", ns_state, CP_STATUS_FILE);
-	f = fopen(path, "r");
+	FILE* f = fopen(path, "r");
 	if (!f) return false;
 	size_t n = fread(body, 1, sizeof(body), f);
 	bool complete = feof(f) && n < sizeof(body);
 	fclose(f);
 	if (!complete) return false;
 	body[n] = '\0';
+	return cp_status_parse(body, s);
+}
+
+bool NS_cablePeer(char* out, int len) {
+	if (!out || len <= 0) return false;
+	out[0] = '\0';
 	CP_Status s;
 	struct in_addr addr;
-	if (!cp_status_parse(body, &s) || !cp_status_link_ready(&s) ||
+	if (!cable_status(&s) || !cp_status_link_ready(&s) ||
 	    strcmp(s.iface, CP_IFACE_NAME) ||
 	    inet_pton(AF_INET, s.peer, &addr) != 1 ||
 	    inet_pton(AF_INET, s.ip, &addr) != 1 ||
@@ -259,10 +272,141 @@ bool NS_cablePeer(char* out, int len) {
 	return true;
 }
 
+static void cable_executable(char* out, int len) {
+	snprintf(out, len, "%s/bin/%s/netplay-cable.elf", ns_pak, ns_platform);
+}
+
+static bool dir_exists(const char* p) {
+	struct stat st;
+	return stat(p, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+/* Only the Brick for now: the daemon knows its two sockets (top host-only,
+ * bottom the only device port). Other devices are probed per model before they
+ * are offered (docs/analysis/usb-cable-plan.md, phase 7). */
+bool NS_canCable(void) {
+	if (strcmp(ns_platform, "tg5040")) return false;
+	char exe[600];
+	cable_executable(exe, sizeof(exe));
+	return access(exe, X_OK) == 0 && access("/dev/net/tun", R_OK | W_OK) == 0 &&
+	       dir_exists("/sys/kernel/config/usb_gadget/g1/functions/ffs.adb") &&
+	       dir_exists("/sys/class/udc/5100000.udc-controller");
+}
+
+bool NS_cableRunning(void) { return cable_pid() != 0; }
+
+/* The daemon, run to completion with the session's environment: --stop and
+ * --repair. */
+static int cable_command(const char* arg) {
+	char exe[600], cmd[1400];
+	cable_executable(exe, sizeof(exe));
+	if (access(exe, X_OK) != 0) return -1;
+	snprintf(cmd, sizeof(cmd),
+	         "SDCARD_PATH='%s' PLATFORM='%s' NETPLAY_PAK='%s' NETPLAY_STATE='%s' '%s' %s "
+	         ">>'%s/%s' 2>&1",
+	         ns_sd, ns_platform, ns_pak, ns_state, exe, arg, ns_state, CP_LOG_FILE);
+	return system(cmd);
+}
+
+bool NS_cableStart(char* err, int errlen) {
+	if (cable_pid()) return true;
+	if (!NS_canCable()) {
+		snprintf(err, errlen, "this device cannot use a USB cable");
+		return false;
+	}
+	char exe[600];
+	cable_executable(exe, sizeof(exe));
+
+	pid_t pid = fork();
+	if (pid < 0) {
+		snprintf(err, errlen, "could not start the cable link");
+		return false;
+	}
+	if (pid == 0) {
+		/* Detached like the broker: the link outlives this app, which exits
+		 * into the game. */
+		setsid();
+		char log_path[512];
+		snprintf(log_path, sizeof(log_path), "%s/%s", ns_state, CP_LOG_FILE);
+		int log_fd = open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+		int null_fd = open("/dev/null", O_RDONLY);
+		if (null_fd >= 0) { dup2(null_fd, STDIN_FILENO); close(null_fd); }
+		if (log_fd >= 0) {
+			dup2(log_fd, STDOUT_FILENO);
+			dup2(log_fd, STDERR_FILENO);
+			if (log_fd > STDERR_FILENO) close(log_fd);
+		}
+		long max_fd = sysconf(_SC_OPEN_MAX);
+		if (max_fd < 0 || max_fd > 4096) max_fd = 4096;
+		for (int fd = STDERR_FILENO + 1; fd < max_fd; fd++) close(fd);
+		setenv("SDCARD_PATH", ns_sd, 1);
+		setenv("PLATFORM", ns_platform, 1);
+		setenv("NETPLAY_PAK", ns_pak, 1);
+		setenv("NETPLAY_STATE", ns_state, 1);
+		execl(exe, exe, "--role", "auto", (char*)NULL);
+		_exit(127);
+	}
+
+	/* Up once it has published a status; bringing the gadget up takes ~1 s. */
+	for (int i = 0; i < 50; i++) {
+		usleep(100 * 1000);
+		CP_Status st;
+		if (cable_status(&st)) {
+			if (st.state == CP_STATE_FAILED) break;
+			if (st.state == CP_STATE_WAIT || st.state == CP_STATE_UP) {
+				ns_log("cable link started (pid %d)\n", (int)pid);
+				return true;
+			}
+		}
+		int status;
+		if (waitpid(pid, &status, WNOHANG) == pid) break;
+	}
+	char detail[96] = "";
+	NS_cableState(detail, sizeof(detail));
+	snprintf(err, errlen, "cable link did not start%s%s", detail[0] ? ": " : "", detail);
+	ns_log("%s\n", err);
+	NS_cableStop();
+	return false;
+}
+
+void NS_cableStop(void) {
+	char record[512];
+	snprintf(record, sizeof(record), "%s/%s", ns_state, CP_RESTORE_FILE);
+	if (!cable_pid() && !file_exists(record)) return;
+	ns_log("stopping the cable link\n");
+	if (cable_command("--stop") != 0) ns_log("cable stop reported a problem; see cable.log\n");
+	/* Reap our own child if this process started it. */
+	while (waitpid(-1, NULL, WNOHANG) > 0) {}
+}
+
+const char* NS_cableState(char* detail, int len) {
+	if (detail && len > 0) detail[0] = '\0';
+	CP_Status s;
+	if (!cable_status(&s)) return "off";
+	switch (s.state) {
+	case CP_STATE_UP:     return "linked";
+	case CP_STATE_FAILED:
+		if (detail && len > 0) snprintf(detail, len, "%s", s.error);
+		return "failed";
+	default:              return "waiting";
+	}
+}
+
+bool NS_cableRecover(void) {
+	char record[512];
+	snprintf(record, sizeof(record), "%s/%s", ns_state, CP_RESTORE_FILE);
+	if (cable_pid() || !file_exists(record)) return false;
+	ns_log("a cable link ended uncleanly; repairing the USB gadget\n");
+	return cable_command("--repair") == 0;
+}
+
 /* Read the first non-loopback IPv4 from `ip addr`. Cheaper and more portable
  * across these firmwares than getifaddrs, which busybox images vary on. */
 bool NS_localIP(char* out, int len) {
-	FILE* f = popen("ip -4 addr show 2>/dev/null | grep -oE 'inet [0-9.]+' | grep -v '127\\.' | head -1 | cut -d' ' -f2", "r");
+	/* Not the cable's point-to-point address: that is not where anyone else
+	 * on the network can reach this device. */
+	FILE* f = popen("ip -4 addr show 2>/dev/null | grep -oE 'inet [0-9.]+' | grep -v '127\\.' "
+	                "| grep -v 'inet 10\\.77\\.0\\.' | head -1 | cut -d' ' -f2", "r");
 	if (!f) return false;
 	bool ok = false;
 	if (fgets(out, len, f)) {
@@ -3056,7 +3200,12 @@ bool NS_arm(NS_Role role, const char* peer_ip, char* err, int errlen) {
 	 * probes cannot lower it: later jitter is what the window must survive. The
 	 * transport selection is information the shim cannot infer on its own. */
 	bool adhoc = hotspot_running || joined_hotspot;
-	fprintf(f, "input_delay=%d\n", adhoc ? NS_INPUT_DELAY_ADHOC : NS_INPUT_DELAY_WIFI);
+	/* Over the cable: the host started the link for this session, and a
+	 * guest's peer is the far end of it. */
+	bool cable = role == NS_ROLE_HOST ? cable_pid() != 0
+	           : peer_ip && (!strcmp(peer_ip, NS_CABLE_HOST_IP) || !strcmp(peer_ip, NS_CABLE_CLIENT_IP));
+	fprintf(f, "input_delay=%d\n", cable ? NS_INPUT_DELAY_CABLE
+	                             : adhoc ? NS_INPUT_DELAY_ADHOC : NS_INPUT_DELAY_WIFI);
 	fprintf(f, "input_delay_auto=1\n");
 
 	/* Kept in the session format while peer executable sharing is frozen. */
@@ -3245,6 +3394,7 @@ void NS_disarm(void) {
 	NS_statusIconSync();
 
 	NS_hotspotStop();
+	NS_cableStop();
 	NS_wifiPowerSaveRestore();
 }
 
@@ -3281,6 +3431,7 @@ void NS_endSession(void) {
 		wifi_client_leave_adhoc();
 	else
 		NS_hotspotStop();
+	NS_cableStop();
 	NS_wifiPowerSaveRestore();
 }
 

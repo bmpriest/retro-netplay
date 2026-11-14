@@ -38,6 +38,7 @@ typedef enum {
 	SCREEN_MENU,
 	SCREEN_ONBOARDING,
 	SCREEN_HOST_MENU,
+	SCREEN_JOIN_MENU,       /* Find hosts / USB cable, where a cable can work */
 	SCREEN_CONFIG,
 	SCREEN_NICKNAME,
 	SCREEN_CORE_LIST,       /* Systems and their expanded emulator rows */
@@ -118,6 +119,11 @@ static NS_Peer* join_at(int i) { return i < peer_count ? &peers[i] : &adhoc[i - 
 #define JOIN_RESCAN_MS     10000
 static bool   join_auto = false;
 static Uint32 join_opened_at, join_single_since, join_scanned_at;
+/* Join > USB cable: this visit started the cable link and lists only hosts
+ * that announce over it; no ad hoc scans. */
+static bool   join_cable = false;
+/* Whether this device can run the cable link at all; probed once at start. */
+static bool   can_cable = false;
 
 /* A hotspot can be visible both through its last broadcast announcement and
  * through the WiFi scan. They are two sightings of one host, not two choices.
@@ -398,7 +404,8 @@ static int draw_footer(SDL_Surface* s, int sel, int y);
  * you need to tell an ad hoc session from a failed one. Submenus keep the top
  * level short enough that the status line is always visible. */
 enum { MENU_HOST, MENU_JOIN, MENU_CONFIG, MENU_COUNT };
-enum { HOST_ADHOC, HOST_WIFI, HOST_COUNT };
+enum { HOST_ADHOC, HOST_WIFI, HOST_CABLE, HOST_COUNT };
+enum { JOIN_FIND, JOIN_CABLE, JOIN_COUNT };
 enum { CONF_NICKNAME, CONF_CORES, CONF_SETTINGS, CONF_DEBUG, CONF_OFF };
 /* "Use simple client" (NS_Settings.simple_client) stays hidden: it was planned
  * but never implemented. The setting is still read and written. */
@@ -411,15 +418,26 @@ enum { REM_NETPLAY, REM_DEVICE, REM_BACKUP, REM_CANCEL };
 /* Creating our own network needs an AP-capable interface. Offering it on a
  * device that cannot do it produces a failure the user cannot act on, so the
  * entry is simply absent there. */
-static int host_menu_count(void) { return NS_canHostAdhoc() ? HOST_COUNT : 1; }
+/* The same goes for the USB cable, offered only where the link can run. */
+static int host_items(int out[HOST_COUNT]) {
+	int n = 0;
+	if (NS_canHostAdhoc()) out[n++] = HOST_ADHOC;
+	out[n++] = HOST_WIFI;
+	if (can_cable) out[n++] = HOST_CABLE;
+	return n;
+}
 
 static const char* host_label(int item) {
-	if (!NS_canHostAdhoc()) item = HOST_WIFI;   /* only one entry to show */
 	switch (item) {
 	case HOST_ADHOC: return "Create ad hoc network";
 	case HOST_WIFI:  return "Host over WiFi";
+	case HOST_CABLE: return "Host over USB cable";
 	}
 	return "";
+}
+
+static const char* join_label(int item) {
+	return item == JOIN_CABLE ? "Join over USB cable" : "Find hosts";
 }
 
 static int config_sel = 0, config_top = 0;
@@ -920,7 +938,18 @@ static int draw_wifi_line(SDL_Surface* s, int y) {
 	if (wifi_up && wifi_rssi) snprintf(line, sizeof(line), "%s  (%d dBm)  -  %s", wifi_ssid, wifi_rssi, local_ip);
 	else if (wifi_up) snprintf(line, sizeof(line), "%s  -  %s", wifi_ssid, local_ip);
 	else         snprintf(line, sizeof(line), "WiFi: %s", wifi_ssid);
-	return draw_line(s, line, y, COLOR_GRAY, true);
+	y = draw_line(s, line, y, COLOR_GRAY, true);
+	if (can_cable) {
+		char detail[96];
+		const char* state = NS_cableState(detail, sizeof(detail));
+		if (strcmp(state, "off")) {
+			if (!strcmp(state, "linked"))  snprintf(line, sizeof(line), "USB cable: linked");
+			else if (!strcmp(state, "failed")) snprintf(line, sizeof(line), "USB cable failed: %s", detail);
+			else snprintf(line, sizeof(line), "USB cable: waiting for the other device");
+			y = draw_line(s, line, y, COLOR_GRAY, true);
+		}
+	}
+	return y;
 }
 
 /* Joining blocks for up to a minute inside NS_hotspotJoin. Without a frame in
@@ -1213,14 +1242,30 @@ static void render(SDL_Surface* s) {
 	case SCREEN_HOST_MENU: {
 		draw_title(s, "Host");
 		int y = SCALE1(PADDING + 44);
-		for (int i = 0; i < host_menu_count(); i++) {
+		int items[HOST_COUNT], n = host_items(items);
+		for (int i = 0; i < n; i++) {
 			Row r = { .kind = ROW_ACTION };
-			snprintf(r.label, sizeof(r.label), "%s", host_label(i));
+			snprintf(r.label, sizeof(r.label), "%s", host_label(items[i]));
 			y = draw_two_col(s, &r, y, i == sub_sel);
 		}
 		if (!NS_canHostAdhoc())
 			y = draw_line(s, "This device cannot create a network (no AP interface).",
 			              y + SCALE1(6), COLOR_GRAY, true);
+		y = draw_wifi_line(s, y + SCALE1(8));
+		if (status[0]) draw_line(s, status, y, COLOR_GRAY, true);
+		GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "SELECT", NULL}, 1, s, 1);
+		break;
+	}
+	case SCREEN_JOIN_MENU: {
+		draw_title(s, "Join");
+		int y = SCALE1(PADDING + 44);
+		for (int i = 0; i < JOIN_COUNT; i++) {
+			Row r = { .kind = ROW_ACTION };
+			snprintf(r.label, sizeof(r.label), "%s", join_label(i));
+			y = draw_two_col(s, &r, y, i == sub_sel);
+		}
+		y = draw_line(s, "USB cable: one device's top socket to the other's bottom socket; "
+		              "both players choose USB cable.", y + SCALE1(6), COLOR_GRAY, true);
 		y = draw_wifi_line(s, y + SCALE1(8));
 		if (status[0]) draw_line(s, status, y, COLOR_GRAY, true);
 		GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "SELECT", NULL}, 1, s, 1);
@@ -1447,10 +1492,23 @@ static void render(SDL_Surface* s) {
 	case SCREEN_JOINING: {
 		draw_title(s, "Join");
 		int y = SCALE1(PADDING + 44);
-		if (join_total == 0) {
+		if (join_total == 0 && join_cable) {
+			char detail[96];
+			const char* state = NS_cableState(detail, sizeof(detail));
+			y = draw_line(s, !strcmp(state, "linked") ? "Cable linked. Looking for a host..."
+			                 : "Waiting for the other device on the cable...", y, COLOR_WHITE, false);
+			y += SCALE1(4);
+			if (!strcmp(state, "failed"))
+				y = draw_line(s, detail, y, COLOR_GRAY, true);
+			else if (!strcmp(state, "linked"))
+				y = draw_line(s, "The other player chooses Host > Host over USB cable.", y, COLOR_GRAY, true);
+			else
+				y = draw_line(s, "Use a data cable from one device's top socket to the other's bottom socket.",
+				              y, COLOR_GRAY, true);
+		} else if (join_total == 0) {
 			y = draw_line(s, "Looking for a host...", y, COLOR_WHITE, false);
 			y += SCALE1(4);
-			y = draw_line(s, "WiFi or USB: the host session must be armed.", y, COLOR_GRAY, true);
+			y = draw_line(s, "WiFi: the host session must be armed.", y, COLOR_GRAY, true);
 			y = draw_line(s, "Ad hoc: scans again every 10s; Y scans now.", y, COLOR_GRAY, true);
 		} else {
 			for (int i = 0; i < join_total; i++) {
@@ -1477,7 +1535,8 @@ static void render(SDL_Surface* s) {
 		}
 		y = draw_wifi_line(s, y + SCALE1(8));
 		if (status[0]) draw_line(s, status, y, COLOR_GRAY, true);
-		GFX_blitButtonGroup((char*[]){"B", "BACK", "Y", "RESCAN", "A", "SELECT", NULL}, 1, s, 1);
+		GFX_blitButtonGroup(join_cable ? (char*[]){"B", "BACK", "A", "SELECT", NULL}
+		                               : (char*[]){"B", "BACK", "Y", "RESCAN", "A", "SELECT", NULL}, 1, s, 1);
 		break;
 	}
 	}
@@ -1585,6 +1644,37 @@ static void change_option(int id, int direction) {
 		prompt_sel = 0;
 		screen = SCREEN_PAK_INSTALL;
 	}
+}
+
+/* Opens the Join list. Over the cable, the link comes up first; the list then
+ * shows only hosts announcing over it. Otherwise one ad hoc scan on entry, so
+ * an ad hoc host shows up without the user having to know to press anything. */
+static void open_join(SDL_Surface* s, bool cable) {
+	if (cable) {
+		snprintf(status, sizeof(status), "Starting the USB cable link...");
+		render(s);
+		char err[128] = "";
+		if (!NS_cableStart(err, sizeof(err))) {
+			snprintf(status, sizeof(status), "%s", err);
+			return;   /* stay on the Join menu with the reason */
+		}
+		status[0] = '\0';
+	}
+	join_cable = cable;
+	peer_count = 0; peer_sel = 0; adhoc_count = 0; join_total = 0;
+	NS_discoverTick(NULL, 0);
+	NS_discoverStart();
+	screen = SCREEN_JOINING;
+	join_auto = true;
+	join_opened_at = SDL_GetTicks();
+	join_single_since = 0;
+	if (!cable) {
+		snprintf(status, sizeof(status), "Scanning for ad hoc networks...");
+		render(s);
+		adhoc_count = NS_scanAdhoc(adhoc, NS_MAX_PEERS);
+		status[0] = '\0';
+	}
+	join_scanned_at = SDL_GetTicks();
 }
 
 /* Join the host at row i of the Join list - picked with A, or the lone host
@@ -1776,6 +1866,8 @@ int main(int argc, char* argv[]) {
 	NS_setProgressCallback(draw_progress);
 	WIFI_init();
 	bool cleaned_leftover = NS_cleanupStaleSession();
+	can_cable = NS_canCable();
+	bool cable_repaired = NS_cableRecover();
 
 	// A join that failed - or an AP that vanished after a successful one - used
 	// to leave the device associated to nothing, with no way back except the
@@ -1786,6 +1878,8 @@ int main(int argc, char* argv[]) {
 	} else if (recovered == NS_RECOVERY_FAILED) {
 		snprintf(status, sizeof(status),
 		         "Could not reconnect to WiFi - use Restore WiFi, or reboot.");
+	} else if (cable_repaired) {
+		snprintf(status, sizeof(status), "Repaired USB after a cable link that ended unexpectedly.");
 	} else if (cleaned_leftover) {
 		snprintf(status, sizeof(status), "Cleaned up a session left by a previous boot.");
 	}
@@ -1921,33 +2015,33 @@ int main(int argc, char* argv[]) {
 				case MENU_HOST:   screen = SCREEN_HOST_MENU; break;
 				case MENU_CONFIG: config_sel = 0; screen = SCREEN_CONFIG; break;
 				case MENU_JOIN:
-					peer_count = 0; peer_sel = 0; adhoc_count = 0; join_total = 0;
-					NS_discoverTick(NULL, 0);
-					NS_discoverStart();
-					screen = SCREEN_JOINING;
-					join_auto = true;
-					join_opened_at = SDL_GetTicks();
-					join_single_since = 0;
-					// One scan on entry so an ad hoc host shows up without the
-					// user having to know to press anything.
-					snprintf(status, sizeof(status), "Scanning for ad hoc networks...");
-					render(s);
-					adhoc_count = NS_scanAdhoc(adhoc, NS_MAX_PEERS);
-					join_scanned_at = SDL_GetTicks();
-					status[0] = '\0';
+					if (can_cable) screen = SCREEN_JOIN_MENU;
+					else open_join(s, false);
 					break;
 				}
 				dirty = 1;
 			}
 			break;
 
+		case SCREEN_JOIN_MENU: {
+			if (PAD_justPressed(BTN_UP))   { sub_sel = (sub_sel + JOIN_COUNT - 1) % JOIN_COUNT; dirty = 1; }
+			if (PAD_justPressed(BTN_DOWN)) { sub_sel = (sub_sel + 1) % JOIN_COUNT; dirty = 1; }
+			if (PAD_justPressed(BTN_B))    { status[0] = '\0'; screen = SCREEN_MENU; dirty = 1; }
+			if (PAD_justPressed(BTN_A)) {
+				status[0] = '\0';
+				open_join(s, sub_sel == JOIN_CABLE);
+				dirty = 1;
+			}
+			break;
+		}
+
 		case SCREEN_HOST_MENU: {
-			int n = host_menu_count();
+			int items[HOST_COUNT], n = host_items(items);
 			if (PAD_justPressed(BTN_UP))   { sub_sel = (sub_sel + n - 1) % n; dirty = 1; }
 			if (PAD_justPressed(BTN_DOWN)) { sub_sel = (sub_sel + 1) % n; dirty = 1; }
 			if (PAD_justPressed(BTN_B))    { screen = SCREEN_MENU; dirty = 1; }
 			if (PAD_justPressed(BTN_A)) {
-				int choice = NS_canHostAdhoc() ? sub_sel : HOST_WIFI;
+				int choice = items[sub_sel < n ? sub_sel : 0];
 				status[0] = '\0';
 
 				if (choice == HOST_ADHOC) {
@@ -1965,12 +2059,26 @@ int main(int argc, char* argv[]) {
 					hosting_hotspot = 1;
 					snprintf(local_ip, sizeof(local_ip), "%s", NS_HOTSPOT_HOST_IP);
 					NS_announceHotspot(hs_ssid, hs_psk);
+					NS_cableStop();
 				} else {
 					// Leaving an AP up would share one radio and one channel
 					// with the network this session is about to run over.
 					hosting_hotspot = 0;
 					NS_hotspotStop();
 					NS_announceHotspot(NULL, NULL);
+					if (choice == HOST_CABLE) {
+						snprintf(status, sizeof(status), "Starting the USB cable link...");
+						render(s);
+						char err[128] = "";
+						if (!NS_cableStart(err, sizeof(err))) {
+							snprintf(status, sizeof(status), "%s", err);
+							dirty = 1;
+							break;
+						}
+						status[0] = '\0';
+					} else {
+						NS_cableStop();
+					}
 				}
 
 				NS_setArmProtocol(NS_settings()->host_protocol);
@@ -2403,6 +2511,16 @@ int main(int argc, char* argv[]) {
 
 		case SCREEN_JOINING: {
 			int n = NS_discoverTick(peers, NS_MAX_PEERS);
+			if (join_cable) {
+				/* Only hosts reached over the link this visit started. */
+				int kept = 0;
+				for (int i = 0; i < n; i++) if (peers[i].cable) peers[kept++] = peers[i];
+				n = kept;
+				static const char* cable_was;
+				char detail[96];
+				const char* state = NS_cableState(detail, sizeof(detail));
+				if (state != cable_was) { cable_was = state; dirty = 1; }
+			}
 			if (n != peer_count) { peer_count = n; dirty = 1; }
 			dedupe_adhoc();
 			join_total = peer_count + adhoc_count;
@@ -2410,15 +2528,28 @@ int main(int argc, char* argv[]) {
 
 			if (PAD_justPressed(BTN_UP) && join_total)   { join_auto = false; peer_sel = (peer_sel + join_total - 1) % join_total; dirty = 1; }
 			if (PAD_justPressed(BTN_DOWN) && join_total) { join_auto = false; peer_sel = (peer_sel + 1) % join_total; dirty = 1; }
-			if (PAD_justPressed(BTN_B)) { join_auto = false; NS_discoverStop(); screen = SCREEN_MENU; dirty = 1; break; }
+			if (PAD_justPressed(BTN_B)) {
+				join_auto = false;
+				NS_discoverStop();
+				if (join_cable && !NS_isArmed()) {
+					snprintf(status, sizeof(status), "Stopping the USB cable link...");
+					render(s);
+					NS_cableStop();
+					status[0] = '\0';
+				}
+				join_cable = false;
+				screen = SCREEN_MENU;
+				dirty = 1;
+				break;
+			}
 
 			/* A scan costs ~2s and briefly steals the radio: on demand, or on a
 			 * timer only while nothing has been found - discovery keeps
 			 * updating meanwhile. */
 			Uint32 now = SDL_GetTicks();
-			bool pressed_y = PAD_justPressed(BTN_Y);
+			bool pressed_y = !join_cable && PAD_justPressed(BTN_Y);
 			if (pressed_y) join_auto = false;
-			if (pressed_y || (join_total == 0 && now - join_scanned_at >= JOIN_RESCAN_MS)) {
+			if (!join_cable && (pressed_y || (join_total == 0 && now - join_scanned_at >= JOIN_RESCAN_MS))) {
 				snprintf(status, sizeof(status), "Scanning for ad hoc networks...");
 				render(s);
 				adhoc_count = NS_scanAdhoc(adhoc, NS_MAX_PEERS);

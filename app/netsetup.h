@@ -58,6 +58,23 @@ bool NS_wifiSSID(char* out, int len);
 /* The cable daemon reports a live point-to-point peer through cable.status. */
 bool NS_cablePeer(char* out, int len);
 
+/* --- USB cable link (docs/cable.md) -------------------------------------
+ *
+ * netplay-cable.elf --role auto bridges IP over a USB cable between two
+ * Bricks: whichever finds the other on its top socket becomes the USB host.
+ * Both players start it - Host > USB cable and Join > USB cable - and the
+ * netplay session then runs over the link like any other network. */
+bool NS_canCable(void);           /* this device can run the cable daemon */
+bool NS_cableStart(char* err, int errlen);   /* starts it; true if running */
+void NS_cableStop(void);          /* stops it and repairs USB; safe if not running */
+bool NS_cableRunning(void);
+/* "off", "waiting" (daemon up, no peer yet), "linked" or "failed"; a failure
+ * fills detail with the daemon's reason when there is one. */
+const char* NS_cableState(char* detail, int len);
+/* A cable daemon that died uncleanly leaves the stock USB gadget and charger
+ * needing repair. Runs that repair when nothing is running; true if it did. */
+bool NS_cableRecover(void);
+
 /* --- assumption checks -------------------------------------------------
  *
  * The shim leans on a few NextUI behaviours that are internal details rather
@@ -434,6 +451,9 @@ int NS_compatSync(const char* host_ip, char* err, int errlen);
  * raises it on a worse link, and power save left on needs 10 or more. */
 #define NS_INPUT_DELAY_ADHOC 3
 #define NS_INPUT_DELAY_WIFI  5
+/* A USB cable round trip is 1-2 ms (two Bricks, 2026-11-14): one frame of
+ * slack is the floor, and the measured round trip can still raise it. */
+#define NS_INPUT_DELAY_CABLE 1
 
 /* Generate throwaway credentials for a session. */
 void NS_hotspotCredentials(char* ssid, int ssid_len, char* psk, int psk_len);
