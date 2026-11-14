@@ -1220,6 +1220,14 @@ static bool cp_lifetime_ok(void) {
  *
  * A failed state is left alone - it is terminal, and this tick must not quietly
  * turn it back into "waiting". */
+/* NP_CABLE_POWER_LIMIT=0 leaves the gadget's charger and input current alone:
+ * a diagnostic switch, for telling the power change apart from anything else
+ * the link does. */
+static bool cp_power_limit_enabled(void) {
+	const char* v = getenv("NP_CABLE_POWER_LIMIT");
+	return !(v && !strcmp(v, "0"));
+}
+
 static bool cp_slow_tick(bool peer_present, bool link_failed) {
 	if (link_failed) {
 		cp_fail("the receive endpoint stopped: %s", strerror(cp_rx_errno ? cp_rx_errno : EIO));
@@ -1227,7 +1235,7 @@ static bool cp_slow_tick(bool peer_present, bool link_failed) {
 	}
 
 	if (cp_status.state != CP_STATE_FAILED) {
-		if (cp_status.role == CP_ROLE_GADGET) {
+		if (cp_status.role == CP_ROLE_GADGET && cp_power_limit_enabled()) {
 			bool power_ok = peer_present ? BP_limit(cp_state_dir)
 			              : cp_udc_configured(cp_status.udc) ? true
 			              : BP_restore(cp_state_dir);

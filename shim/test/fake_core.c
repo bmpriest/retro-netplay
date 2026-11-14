@@ -314,7 +314,12 @@ void retro_run(void) {
 		static unsigned input_sum = 2166136261u;
 		int p0 = cb_input_state(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK);
 		int p1 = cb_input_state(1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK);
-		if (shown < 400) printf("core:ports p0=%d p1=%d\n", p0, p1);
+		/* Input the netplay buffers do not carry (an analog axis, a third
+		 * port): it has to read the same on both peers, which means neutral. */
+		int unsynced = cb_input_state(0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT,
+		                              RETRO_DEVICE_ID_ANALOG_X) |
+		               cb_input_state(2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_MASK);
+		if (shown < 400) printf("core:ports p0=%d p1=%d unsynced=%d\n", p0, p1, unsynced);
 		/* FNV over the input stream: identical only if both peers ran the same
 		 * frames with the same inputs, in the same order. */
 		input_sum ^= (unsigned)p0; input_sum *= 16777619u;

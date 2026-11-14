@@ -3492,6 +3492,15 @@ static int16_t shim_input_state(unsigned port, unsigned device, unsigned index, 
 		if (id == RETRO_DEVICE_ID_JOYPAD_MASK) return (int16_t)b;
 		return (b >> id) & 1;
 	}
+	/* Anything else the synced buffers do not carry - analog sticks, other
+	 * ports, pointers - would be each device's own frontend talking: the
+	 * host's local stick, the guest's local stick on the wrong port, whatever
+	 * resting value a frontend reports. A core that reads it (PCSX-ReARMed with
+	 * the DualShock in analog mode, every frame) then runs different input on
+	 * each side, and CTR between a NextUI and a spruce Brick desynced at every
+	 * check from identical cores and options (2026-11-14). Neutral on both
+	 * sides is the same on both sides. */
+	if (netplay_mode && netplay_synced && !dual_link_mode) return 0;
 	return fe_input_state ? fe_input_state(port, device, index, id) : 0;
 }
 

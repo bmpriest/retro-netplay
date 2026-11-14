@@ -358,6 +358,8 @@ for side in h7 c7; do
 done
 
 # Port 1 non-zero can only have come over the wire.
+expect "$OUT/h7.log" "core:ports p0=17 p1=34 unsynced=0" "host feeds unsynced input (analog, port 2) as neutral"
+expect "$OUT/c7.log" "core:ports p0=17 p1=34 unsynced=0" "guest feeds unsynced input (analog, port 2) as neutral"
 grep -q "core:ports p0=17 p1=34" "$OUT/h7.log" && grep -q "core:ports p0=17 p1=34" "$OUT/c7.log" \
 	&& echo "  ok   second player arrived over the network" \
 	|| { echo "  MISS second player never arrived"; fail=1; }
