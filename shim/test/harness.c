@@ -237,6 +237,7 @@ int main(int argc, char** argv) {
 	// Like minarch with PCSX-ReARMed: the frontend plugs a DualShock (517)
 	// into the first port, here after loading, as a joypad hot-plug does.
 	set_controller_port_device(0, 517);
+	set_controller_port_device(2, 0);
 
 	struct retro_system_av_info av;
 	memset(&av, 0, sizeof(av));

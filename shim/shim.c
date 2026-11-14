@@ -3209,6 +3209,39 @@ static void request_options_resync(void) {
 	shim_log("requested the host's state again now its core options are in effect\n");
 }
 
+/* Diagnosis: /tmp/netplay-trace holding "LAST [DUMP_FROM]" hashes the state
+ * before every synced frame below LAST and logs it with that frame's input, so
+ * two logs show the first frame two sides parted. Frames from DUMP_FROM on are
+ * also dumped. Check frames are skipped: the check serializes those itself. */
+static void trace_frame(void) {
+	static long limit = -2, dump_from = -1;
+	if (limit == -2) {
+		limit = -1;
+		FILE* f = fopen("/tmp/netplay-trace", "r");
+		if (f) {
+			long a = -1, b = -1;
+			if (fscanf(f, "%ld %ld", &a, &b) >= 1) { limit = a; dump_from = b; }
+			fclose(f);
+		}
+	}
+	if (limit < 0 || netplay_frame >= (unsigned long)limit ||
+	    netplay_frame % HASH_INTERVAL == 0) return;
+	void* snap = NULL;
+	size_t len = 0;
+	uint32_t h = 0;
+	if (!capture_state(&snap, &len, &h)) return;
+	shim_log("trace f=%u hash=%08x in=%04x/%04x\n", netplay_frame, h,
+	         frame_buttons[0], frame_buttons[1]);
+	if (dump_from >= 0 && netplay_frame >= (unsigned long)dump_from) {
+		char dump[96];
+		snprintf(dump, sizeof(dump), "/tmp/netplay-trace-%s-%u.state",
+		         NetLink_getRole() == NETLINK_ROLE_HOST ? "host" : "guest", netplay_frame);
+		FILE* df = fopen(dump, "wb");
+		if (df) { fwrite(snap, 1, len, df); fclose(df); }
+	}
+	free(snap);
+}
+
 static bool netplay_checkDivergence(void) {
 	if (NetLink_getRole() == NETLINK_ROLE_HOST) {
 		uint32_t frame, hash;
@@ -3683,6 +3716,19 @@ static void force_same_controllers(void) {
 
 void retro_set_controller_port_device(unsigned port, unsigned device) {
 	if (!core.handle) return;
+	/* Ports beyond the two players are the core's own default on both sides:
+	 * the synced input never reaches them, and a frontend's choice there is
+	 * local. Taking it would be worse than useless - PCSX-ReARMed's load_game
+	 * makes all 8 ports standard pads, and RetroArch then sets ports 3-8 on a
+	 * spruce guest only. Any change calls padChanged(), whose replug timer
+	 * the savestate does not carry, so the guest's first pad poll after the
+	 * sync read "no controller" and CTR desynced at frame 129 of every
+	 * NextUI-spruce session (2026-11-14). */
+	if (same_controllers() && port >= 2) {
+		shim_log("frontend asked for device %u on port %u; kept the core's default\n",
+		         device, port + 1);
+		return;
+	}
 	if (same_controllers() && port < 2) {
 		/* Once the game is loaded, the pads stay as set. Even a request for
 		 * the pad already plugged in makes PCSX-ReARMed reinitialise it, and
@@ -5368,6 +5414,7 @@ void retro_run(void) {
 		frame_buttons[0] = host ? mine : theirs;
 		frame_buttons[1] = host ? theirs : mine;
 
+		trace_frame();
 		if (netplay_checkDivergence()) {
 			if (fe_input_poll) fe_input_poll();
 			present_paused_frame(0, "Desync detected - resynchronizing...");

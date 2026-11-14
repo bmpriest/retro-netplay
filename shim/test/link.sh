@@ -359,6 +359,9 @@ done
 
 # Port 1 non-zero can only have come over the wire.
 for side in h7 c7; do
+	if grep -q "core:device port=[2-7]" "$OUT/$side.log"; then
+		echo "  MISS $side passed the frontend's device on port 3+ to the core"; fail=1
+	fi
 	if grep -q "core:device port=[01] dev=517" "$OUT/$side.log"; then
 		echo "  MISS $side passed the frontend's DualShock to the core"; fail=1
 	elif grep -q "core:device port=0 dev=1" "$OUT/$side.log"; then
