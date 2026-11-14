@@ -41,6 +41,7 @@ typedef struct {
 	NS_Mode mode;
 	bool    hotspot;                /* host will move to its own network */
 	bool    scanned;                /* found by SSID scan, not by announcement */
+	bool    cable;                  /* announcement arrived from the USB peer */
 	char    ssid[NS_SSID_LEN];
 	char    psk[NS_PSK_LEN];
 } NS_Peer;
@@ -54,6 +55,8 @@ const char* NS_sdPath(void);
 const char* NS_statePath(void); /* durable state in .userdata/shared/Netplay */
 bool NS_localIP(char* out, int len);
 bool NS_wifiSSID(char* out, int len);
+/* The cable daemon reports a live point-to-point peer through cable.status. */
+bool NS_cablePeer(char* out, int len);
 
 /* --- assumption checks -------------------------------------------------
  *
@@ -355,6 +358,11 @@ uint32_t NS_runtimeGlibc(void);
  * No executable code crosses the network.
  */
 #define NS_CORE_PORT 55439
+
+/* The USB bridge is a point-to-point TUN link, separate from ad hoc WiFi. */
+#define NS_CABLE_HOST_IP   "10.77.0.1"
+#define NS_CABLE_CLIENT_IP "10.77.0.2"
+#define NS_CABLE_PREFIX    "30"
 
 /* Host broker: accept and serve one exchange if a client is waiting.
  * Non-blocking accept keeps the idle detached process inexpensive. */

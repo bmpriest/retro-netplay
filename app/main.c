@@ -1450,7 +1450,7 @@ static void render(SDL_Surface* s) {
 		if (join_total == 0) {
 			y = draw_line(s, "Looking for a host...", y, COLOR_WHITE, false);
 			y += SCALE1(4);
-			y = draw_line(s, "On WiFi: the host session must still be armed.", y, COLOR_GRAY, true);
+			y = draw_line(s, "WiFi or USB: the host session must be armed.", y, COLOR_GRAY, true);
 			y = draw_line(s, "Ad hoc: scans again every 10s; Y scans now.", y, COLOR_GRAY, true);
 		} else {
 			for (int i = 0; i < join_total; i++) {
@@ -1468,7 +1468,7 @@ static void render(SDL_Surface* s) {
 						snprintf(r.label, sizeof(r.label), "%s (%s)", pr->nick, pr->ip);
 					else
 						snprintf(r.label, sizeof(r.label), "%s", pr->ip);
-					snprintf(r.value, sizeof(r.value), "%s%s%s", pr->hotspot ? "ad hoc" : "WiFi",
+					snprintf(r.value, sizeof(r.value), "%s%s%s", pr->cable ? "USB cable" : pr->hotspot ? "ad hoc" : "WiFi",
 					         pr->protocol == NS_PROTO_RETROARCH ? ", RetroArch" : "",
 					         same ? "" : ", other device");
 				}

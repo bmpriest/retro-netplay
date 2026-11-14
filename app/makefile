@@ -19,6 +19,7 @@ TARGET  = netplay.elf
 BROKER_TARGET = netplay-broker.elf
 WIFIPS_TARGET = netplay-wifips.elf
 QUICKMENU_TARGET = netplay-quickmenu.elf
+CABLE_TARGET = netplay-cable.elf
 NEXTUI ?= ../../../NextUI
 
 ifeq (,$(PLATFORM))
@@ -46,7 +47,7 @@ ifeq (,$(filter $(FIRMWARE),nextui spruce))
 $(error invalid FIRMWARE '$(FIRMWARE)'. Supported: nextui spruce)
 endif
 
-SOURCE   = main.c control.c netsetup.c engines.c hints.c onboarding.c qoi.c nextui/chordcap.c \
+SOURCE   = main.c control.c netsetup.c cableproto.c engines.c hints.c onboarding.c qoi.c nextui/chordcap.c \
            $(COMMON)/api.c $(COMMON)/utils.c $(COMMON)/config.c $(COMMON)/scaler.c \
            $(PLATDIR)/platform.c
 
@@ -61,7 +62,7 @@ endif
 
 BIN      = ../bin/$(PLATFORM)
 ifeq (spruce,$(FIRMWARE))
-SOURCE   = spruce/engine.c control.c netsetup.c engines.c
+SOURCE   = spruce/engine.c control.c netsetup.c cableproto.c engines.c
 BIN      = ../bin/spruce/$(SPRUCE_RUNTIME_PLATFORM)
 FIRMWARE_FLAGS = -DNETPLAY_SPRUCE
 endif
@@ -85,6 +86,7 @@ PRODUCT = $(BIN)/$(TARGET)
 BROKER_PRODUCT = $(BIN)/$(BROKER_TARGET)
 WIFIPS_PRODUCT = $(BIN)/$(WIFIPS_TARGET)
 QUICKMENU_PRODUCT = $(BIN)/$(QUICKMENU_TARGET)
+CABLE_PRODUCT = $(BIN)/$(CABLE_TARGET)
 
 all:
 	@mkdir -p $(BIN)
@@ -94,18 +96,23 @@ else
 	$(CROSS_COMPILE)gcc $(SOURCE) -o $(PRODUCT) $(CFLAGS) $(LDFLAGS)
 endif
 	@echo "built $(PRODUCT)"
-	$(CROSS_COMPILE)gcc broker.c netsetup.c engines.c -o $(BROKER_PRODUCT) $(CFLAGS) $(BROKER_LDFLAGS)
+	$(CROSS_COMPILE)gcc broker.c netsetup.c cableproto.c engines.c -o $(BROKER_PRODUCT) $(CFLAGS) $(BROKER_LDFLAGS)
 	@echo "built $(BROKER_PRODUCT)"
 	$(CROSS_COMPILE)gcc wifi-ps.c -o $(WIFIPS_PRODUCT) -O2 -s -Wall -std=gnu99
 	@echo "built $(WIFIPS_PRODUCT)"
 ifeq (nextui,$(FIRMWARE))
 	# Like the broker: netsetup.c's hosting without the frontend. It reads
 	# evdev itself and has Varnish draw, so it links no SDL at all.
-	$(CROSS_COMPILE)gcc nextui/quickmenu.c netsetup.c engines.c -o $(QUICKMENU_PRODUCT) $(CFLAGS) $(BROKER_LDFLAGS)
+	$(CROSS_COMPILE)gcc nextui/quickmenu.c netsetup.c cableproto.c engines.c -o $(QUICKMENU_PRODUCT) $(CFLAGS) $(BROKER_LDFLAGS)
 	@echo "built $(QUICKMENU_PRODUCT)"
+endif
+ifeq (tg5040,$(PLATFORM))
+	$(CROSS_COMPILE)gcc usbnet.c cableproto.c brick-power.c netsetup.c \
+		-o $(CABLE_PRODUCT) $(CFLAGS) $(BROKER_LDFLAGS) -lpthread
+	@echo "built $(CABLE_PRODUCT)"
 endif
 
 clean:
-	rm -f ../bin/*/$(TARGET) ../bin/spruce/*/* ../bin/*/$(BROKER_TARGET) ../bin/*/$(WIFIPS_TARGET) ../bin/*/$(QUICKMENU_TARGET)
+	rm -f ../bin/*/$(TARGET) ../bin/spruce/*/* ../bin/*/$(BROKER_TARGET) ../bin/*/$(WIFIPS_TARGET) ../bin/*/$(QUICKMENU_TARGET) ../bin/*/$(CABLE_TARGET)
 
 .PHONY: all clean

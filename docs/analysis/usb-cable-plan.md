@@ -146,11 +146,10 @@ data cable; if nothing connects, try the other port").
 
 ### 8. The app
 
-Two selectable entries, built in the current row-and-hint menu style with text
-in `pak_hints.json`:
-
-- **Host ▸ Cable (USB)**
-- **Join ▸ USB cable peer** (a fixed last row; it is not a discovered host)
+Host gains **Host ▸ USB cable** after the daemon and device capability checks
+work. Join uses the same automatic discovery list as WiFi and ad hoc. The host
+sends its versioned announcement directly to the cable peer; a live cable
+transport alone is not accepted as a netplay host.
 
 Plus status text: the cable line on the session screen, "Hosting over cable" /
 "Joining over cable" / "Ending the cable link" progress, and a startup notice
@@ -158,13 +157,34 @@ when an interrupted session's gadget was repaired. Input delay floor: 1 frame.
 
 ## Phases
 
+Current branch progress (2026-11-04): the protocol and Brick-only bridge daemon
+are implemented and cross-build for tg5040. The gadget path adds `ffs.cable`
+beside the stock `ffs.adb` in `g1`, leaving USB identity intact. The host path
+only scans the permanent top-port controller. Both paths use a `/30` TUN link
+and exchange a bridge heartbeat before publishing `up`. A PC that merely
+configures the gadget is therefore not a cable peer. On the gadget side the
+AXP2202 charger is disabled and input current capped at its minimum while a
+bridge peer is present. The original register values and UDC name are saved
+for `--stop` or `--repair` after SIGKILL. These bits are covered by native
+protocol, PMIC rule and simulated gadget repair tests. The tg5040 toolchain
+build passes. Both connected Bricks were checked read-only for `g1/c.1`,
+`ffs.adb`, the expected UDC, the top host controller, TUN and `axp_reg`.
+
+The broker sends discovery announcements directly to a live cable peer, and
+Join labels those announcements as USB cable candidates. A discovered Linkplay
+candidate still goes through the normal core compatibility exchange. The
+hardware arm/stop, unplug and SIGKILL tests in phase 3 remain, so the USB menu
+choice is not exposed yet. The current daemon uses an explicit `--role host` or
+`--role gadget`; role-independent start belongs to phase 4.
+
 1. **Inventory.** Read the fork's `usbnet.c`, `cableproto.c` and tests; list
    what is ported, what is replaced by the design above, and what is dropped.
 2. **Daemon on `main`.** The bridge and framing as a separate binary with a
    host build, and the fork's protocol unit tests in `make test`.
 3. **Gadget beside `adb` on a Brick.** Pass criteria: 50 arm/stop cycles with
    `adb` alive after each; `kill -9` of the daemon followed by `stop` restores
-   `adb`; a pulled and re-plugged cable relinks.
+   `adb`; a pulled and re-plugged cable relinks. **Passed 2026-11-14** (results
+   in `docs/cable.md`).
 4. **Role independence.** Either cable direction with either device hosting.
 5. **App integration.** Menu entries, `link=` session key, broker status, the
    watchdog's repair record, hints.

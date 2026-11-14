@@ -1,0 +1,81 @@
+#!/bin/sh
+# Native Brick cable checks: PMIC bit rules and gadget repair order.
+set -eu
+cd "$(dirname "$0")/.."
+root=$(mktemp -d /tmp/netplay-brick-cable.XXXXXX)
+trap 'rm -rf "$root"' EXIT HUP INT TERM
+
+${CC:-cc} -std=gnu99 -Wall -Wextra -Werror -Iapp \
+    app/brick-power.c testing/test-brick-power.c -o "$root/power-test"
+"$root/power-test"
+
+${CC:-cc} -std=gnu99 -Wall -Wextra -Werror -DPLATFORM='"tg5040"' -Iapp \
+    app/usbnet.c app/cableproto.c app/brick-power.c testing/cable-host-stubs.c \
+    -lpthread -o "$root/netplay-cable.elf"
+
+mkdir -p "$root/sys/1-1" "$root/sys/1-1:1.0" "$root/sys/1-1:1.1"
+ln -s '/devices/platform/soc/5200000.ehci1-controller/usb1' "$root/sys/usb1"
+printf '1\n' > "$root/sys/1-1/busnum"
+printf '2\n' > "$root/sys/1-1/devnum"
+printf 'ff\n' > "$root/sys/1-1:1.0/bInterfaceClass"
+printf '42\n' > "$root/sys/1-1:1.0/bInterfaceSubClass"
+printf '01\n' > "$root/sys/1-1:1.0/bInterfaceProtocol"
+printf 'ff\n' > "$root/sys/1-1:1.1/bInterfaceClass"
+printf '4e\n' > "$root/sys/1-1:1.1/bInterfaceSubClass"
+printf '01\n' > "$root/sys/1-1:1.1/bInterfaceProtocol"
+probe=$(NP_CABLE_USB_SYSFS="$root/sys" NP_CABLE_USB_DIR="$root/dev" \
+    "$root/netplay-cable.elf" --probe)
+test "$probe" = "$root/dev/001/002"
+ln -sfn '/devices/platform/soc/5100000.ehci0-controller/usb1' "$root/sys/usb1"
+if NP_CABLE_USB_SYSFS="$root/sys" NP_CABLE_USB_DIR="$root/dev" \
+   "$root/netplay-cable.elf" --probe >/dev/null; then
+	echo 'probe accepted an interface on the wrong USB controller' >&2
+	exit 1
+fi
+
+gadget="$root/config/usb_gadget/g1"
+state="$root/card/.userdata/shared/Netplay"
+mkdir -p "$gadget/configs/c.1" "$gadget/functions/ffs.cable" "$state" "$root/ffs"
+printf '5100000.udc-controller\n' > "$gadget/UDC"
+ln -s "$gadget/functions/ffs.cable" "$gadget/configs/c.1/ffs.cable"
+
+# A linked function with no saved controller must be left untouched.
+if SDCARD_PATH="$root/card" NP_CABLE_CONFIGFS="$root/config" \
+   NP_CABLE_FFS_DIR="$root/ffs" "$root/netplay-cable.elf" --repair; then
+	echo 'repair accepted a linked function without a saved UDC' >&2
+	exit 1
+fi
+test -L "$gadget/configs/c.1/ffs.cable"
+
+printf 'udc=5100000.udc-controller\n' > "$state/usb_restore"
+mv "$gadget/UDC" "$gadget/UDC.saved"
+mkdir "$gadget/UDC"
+if SDCARD_PATH="$root/card" NP_CABLE_CONFIGFS="$root/config" \
+   NP_CABLE_FFS_DIR="$root/ffs" "$root/netplay-cable.elf" --repair; then
+	echo 'repair unlinked the function when UDC was unreadable' >&2
+	exit 1
+fi
+test -L "$gadget/configs/c.1/ffs.cable"
+test -f "$state/usb_restore"
+rmdir "$gadget/UDC"
+mv "$gadget/UDC.saved" "$gadget/UDC"
+
+# With VBUS present, a bind the controller never attaches to is a failed bind,
+# whatever the UDC attribute reads back; the repair record stays.
+mkdir -p "$root/udc/5100000.udc-controller"
+printf '1\n' > "$root/vbus"
+printf 'not attached\n' > "$root/udc/5100000.udc-controller/state"
+if SDCARD_PATH="$root/card" NP_CABLE_CONFIGFS="$root/config" NP_CABLE_FFS_DIR="$root/ffs" \
+   NP_CABLE_UDC_DIR="$root/udc" NP_CABLE_VBUS="$root/vbus" "$root/netplay-cable.elf" --repair; then
+	echo 'repair accepted a bind the controller never attached to' >&2
+	exit 1
+fi
+test -f "$state/usb_restore"
+
+printf 'configured\n' > "$root/udc/5100000.udc-controller/state"
+SDCARD_PATH="$root/card" NP_CABLE_CONFIGFS="$root/config" NP_CABLE_FFS_DIR="$root/ffs" \
+    NP_CABLE_UDC_DIR="$root/udc" NP_CABLE_VBUS="$root/vbus" "$root/netplay-cable.elf" --repair
+test ! -e "$gadget/configs/c.1/ffs.cable"
+test ! -e "$state/usb_restore"
+test "$(cat "$gadget/UDC")" = '5100000.udc-controller'
+echo 'Brick cable repair: ok'

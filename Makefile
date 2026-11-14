@@ -649,7 +649,7 @@ app-spruce:
 	done
 	@ls -la bin/spruce/*/netplay*.elf | awk '{printf "   %-46s %s bytes\n", $$NF, $$5}'
 
-dist-spruce: $(foreach p,$(SPRUCE_PLATFORMS),check-shim-$(if $(filter my285,$(p)),my282,$(p)) check-spruce-app-$(p)) check-netplay-cores check-udhcpd check-compatibility \
+dist-spruce: $(foreach p,$(SPRUCE_PLATFORMS),check-shim-$(if $(filter my285,$(p)),my282,$(p)) check-spruce-app-$(p)) check-spruce-cable-tg5040 check-netplay-cores check-udhcpd check-compatibility \
              $(DRASTIC_RADIO)
 	@rm -rf "$(SPRUCE_STAGE)" "$(SPRUCE_ARCHIVE)"
 	@D="$(SPRUCE_STAGE)/App/Netplay"; mkdir -p "$$D/backup" && \
@@ -681,6 +681,7 @@ dist-spruce: $(foreach p,$(SPRUCE_PLATFORMS),check-shim-$(if $(filter my285,$(p)
 			cp bin/$$p/udhcpd "$$D/bin/$$p/" || exit 1 ;; \
 		esac; \
 	done && \
+	cp bin/spruce/tg5040/netplay-cable.elf "$$D/bin/tg5040/" && \
 	if [ -d dist/compatibility/aarch64 ]; then \
 		mkdir -p "$$D/cores/compatibility" && \
 		cp -R dist/compatibility/aarch64 "$$D/cores/compatibility/" && \
@@ -704,6 +705,8 @@ check-spruce-app-%:
 test:
 	@cc -Wall -I app -o /tmp/netplay-engines-test testing/engines-test.c app/engines.c && /tmp/netplay-engines-test
 	@/tmp/netplay-engines-test --matrix | diff -u docs/engine-matrix.md - || { echo "docs/engine-matrix.md is stale: regenerate with --matrix"; exit 1; }
+	@./testing/test-cableproto.sh
+	@./testing/test-brick-cable.sh
 	@./shim/test/run.sh
 	@./shim/test/link.sh
 	@./shim/test/dual.sh
@@ -749,7 +752,7 @@ test:
 # shipped and is the pak's whole UI.)
 ###########################################################
 
-BASE_DIST_CHECKS := $(foreach p,$(PLATFORMS),check-shim-$(p) check-app-$(p)) check-netplay-cores check-dsp check-nds check-varnish check-udhcpd
+BASE_DIST_CHECKS := $(foreach p,$(PLATFORMS),check-shim-$(p) check-app-$(p)) check-cable-tg5040 check-netplay-cores check-dsp check-nds check-varnish check-udhcpd
 
 dist: dist-base dist-compatibility dist-full
 	@echo
@@ -816,6 +819,7 @@ dist-base: $(BASE_DIST_CHECKS)
 		cp bin/$$p/netplay-wifips.elf "$(BASE_STAGE)/$(PAK)/bin/$$p/"; \
 		cp bin/$$p/netplay-quickmenu.elf "$(BASE_STAGE)/$(PAK)/bin/$$p/"; \
 		done
+	@cp bin/tg5040/netplay-cable.elf "$(BASE_STAGE)/$(PAK)/bin/tg5040/"
 	@for p in $(UDHCPD_PLATFORMS); do \
 		cp bin/$$p/udhcpd "$(BASE_STAGE)/$(PAK)/bin/$$p/"; \
 	done
@@ -894,6 +898,14 @@ check-app-%:
 		echo "missing bin/$*/netplay-broker.elf - run 'make app' first"; exit 1; }
 	@test -f bin/$*/netplay-quickmenu.elf || { \
 		echo "missing bin/$*/netplay-quickmenu.elf - run 'make app' first"; exit 1; }
+
+check-cable-tg5040:
+	@test -f bin/tg5040/netplay-cable.elf || { \
+		echo "missing Brick cable daemon - run 'make app' first"; exit 1; }
+
+check-spruce-cable-tg5040:
+	@test -f bin/spruce/tg5040/netplay-cable.elf || { \
+		echo "missing spruce Brick cable daemon - run 'make app-spruce' first"; exit 1; }
 
 clean:
 	rm -rf dist

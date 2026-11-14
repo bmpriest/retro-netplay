@@ -1,5 +1,6 @@
 #include "netsetup.h"
 #include "engines.h"
+#include "usbnet.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -217,6 +218,46 @@ const char* NS_platform(void) { return ns_platform; }
 const char* NS_pakPath(void)  { return ns_pak; }
 const char* NS_sdPath(void)   { return ns_sd; }
 const char* NS_statePath(void) { return ns_state; }
+
+bool NS_cablePeer(char* out, int len) {
+	if (!out || len <= 0) return false;
+	out[0] = '\0';
+	char path[512], body[CP_STATUS_MAX + 1], pid_text[32];
+	snprintf(path, sizeof(path), "%s/%s", ns_state, CP_PID_FILE);
+	FILE* f = fopen(path, "r");
+	if (!f) return false;
+	bool pid_ok = fgets(pid_text, sizeof(pid_text), f) != NULL;
+	fclose(f);
+	if (!pid_ok) return false;
+	char* end;
+	long pid = strtol(pid_text, &end, 10);
+	if (pid <= 1 || (*end && *end != '\n') || kill((pid_t)pid, 0) != 0) return false;
+	char proc[64], command[256];
+	snprintf(proc, sizeof(proc), "/proc/%ld/cmdline", pid);
+	f = fopen(proc, "r");
+	if (!f) return false;
+	size_t cmd_len = fread(command, 1, sizeof(command) - 1, f);
+	fclose(f);
+	command[cmd_len] = '\0';
+	if (!strstr(command, "netplay-cable.elf")) return false;
+	snprintf(path, sizeof(path), "%s/%s", ns_state, CP_STATUS_FILE);
+	f = fopen(path, "r");
+	if (!f) return false;
+	size_t n = fread(body, 1, sizeof(body), f);
+	bool complete = feof(f) && n < sizeof(body);
+	fclose(f);
+	if (!complete) return false;
+	body[n] = '\0';
+	CP_Status s;
+	struct in_addr addr;
+	if (!cp_status_parse(body, &s) || !cp_status_link_ready(&s) ||
+	    strcmp(s.iface, CP_IFACE_NAME) ||
+	    inet_pton(AF_INET, s.peer, &addr) != 1 ||
+	    inet_pton(AF_INET, s.ip, &addr) != 1 ||
+	    !strcmp(s.ip, s.peer) || strlen(s.peer) >= (size_t)len) return false;
+	snprintf(out, len, "%s", s.peer);
+	return true;
+}
 
 /* Read the first non-loopback IPv4 from `ip addr`. Cheaper and more portable
  * across these firmwares than getifaddrs, which busybox images vary on. */
@@ -3324,6 +3365,14 @@ void NS_announceTick(void) {
 	a2.protocol = htonl((uint32_t)announce_protocol);
 	snprintf(a2.nick, sizeof(a2.nick), "%s", announce_nick);
 	sendto(announce_fd, &a2, sizeof(a2), 0, (struct sockaddr*)&to, sizeof(to));
+	/* The USB bridge is point to point; broadcast cannot reach its peer. Send
+	 * the same versioned announcements directly when the cable is live. */
+	char cable_ip[NS_IP_LEN];
+	if (NS_cablePeer(cable_ip, sizeof(cable_ip)) &&
+	    inet_pton(AF_INET, cable_ip, &to.sin_addr) == 1) {
+		sendto(announce_fd, &a, sizeof(a), 0, (struct sockaddr*)&to, sizeof(to));
+		sendto(announce_fd, &a2, sizeof(a2), 0, (struct sockaddr*)&to, sizeof(to));
+	}
 
 	gettimeofday(&last_announce, NULL);
 }
@@ -3432,12 +3481,19 @@ int NS_discoverTick(NS_Peer* peers, int max) {
 
 		char ip[NS_IP_LEN];
 		inet_ntop(AF_INET, &from.sin_addr, ip, sizeof(ip));
+		char cable_ip[NS_IP_LEN];
+		bool cable = NS_cablePeer(cable_ip, sizeof(cable_ip)) &&
+		             !strcmp(ip, cable_ip);
 
 		int known = -1;
 		for (int i = 0; i < count; i++)
 			if (!strcmp(peers[i].ip, ip)) { known = i; break; }
 		/* A version 2 packet completes the entry its version 1 twin made. */
 		if (known >= 0 && v2) {
+			if (cable) {
+				peers[known].cable = true;
+				peers[known].hotspot = false;
+			}
 			peers[known].protocol = ntohl(a2.protocol) == NS_PROTO_RETROARCH
 			                      ? NS_PROTO_RETROARCH : NS_PROTO_LINKPLAY;
 			a2.nick[sizeof(a2.nick) - 1] = '\0';
@@ -3453,12 +3509,14 @@ int NS_discoverTick(NS_Peer* peers, int max) {
 			snprintf(peers[count].nick, sizeof(peers[count].nick), "%s", a2.nick);
 			NS_sanitizeNickname(peers[count].nick);
 		}
+		peers[count].cable = cable;
 
 		snprintf(peers[count].ip, NS_IP_LEN, "%s", ip);
 		a.platform[sizeof(a.platform) - 1] = '\0';
 		snprintf(peers[count].platform, sizeof(peers[count].platform), "%s", a.platform);
 		peers[count].mode = (ntohl(a.mode) == NS_MODE_LINK) ? NS_MODE_LINK : NS_MODE_NETPLAY;
 		peers[count].hotspot = ntohl(a.hotspot) != 0;
+		if (cable) peers[count].hotspot = false;
 		a.ssid[sizeof(a.ssid) - 1] = '\0';
 		a.psk[sizeof(a.psk) - 1]   = '\0';
 		/* A forged or malformed network is not offered; the peer still is. */
