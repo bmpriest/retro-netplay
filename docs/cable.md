@@ -2,7 +2,9 @@
 
 `bin/tg5040/netplay-cable.elf` carries IPv4 packets over a USB-C data cable.
 The **top** Brick port is the USB host; the **bottom** port is the gadget. Run
-one daemon with `--role host` and the other with `--role gadget`. The netplay
+`--role auto` on both: each offers the gadget on its bottom socket and watches
+its top socket, and the Brick that finds the peer on its top socket becomes the
+USB host (`--role host`/`--role gadget` still force one). The netplay
 Host/Join choice is independent of these electrical roles.
 
 The gadget adds `ffs.cable` beside the firmware's `ffs.adb` and preserves its
@@ -41,5 +43,18 @@ and retried; 10 of 10 kill/restart runs then came up, two after a retry.
 A daemon killed with SIGKILL leaves `cable.status` saying `up`. The broker's
 reader (`netsetup.c`) already requires a live `cable.pid` running
 `netplay-cable.elf`; any other reader must do the same.
+
+Phase 4 (role independence) passed on 2026-11-14 with `--role auto` on both
+Bricks: either start order, or both at once, with the cable either way round
+(NextUI Brick as gadget and as host, spruce Brick likewise); the USB host is
+chosen 1-6 s after the later start and the link is up about a second after
+that. 20 arm/stop cycles with the spruce Brick as gadget were clean too.
+The choice is made once per daemon: a cable re-plugged the same way round
+relinks, one turned round needs a restart.
+
+A bind now expects the controller to attach only when a USB host had
+configured it just before (the case both failures came from). VBUS alone
+cannot tell a host from a wall charger, and a charger in the bottom socket of
+the Brick that becomes the host must not cost rebind attempts.
 
 The app does not yet offer Host > USB cable.

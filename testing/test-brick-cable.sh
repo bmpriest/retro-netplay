@@ -60,18 +60,23 @@ test -f "$state/usb_restore"
 rmdir "$gadget/UDC"
 mv "$gadget/UDC.saved" "$gadget/UDC"
 
-# With VBUS present, a bind the controller never attaches to is a failed bind,
-# whatever the UDC attribute reads back; the repair record stays.
+# VBUS from a wall charger: the controller was never configured by a host and
+# stays "not attached". That is not a failed bind, so the repair must neither
+# fail nor sit through rebind attempts.
 mkdir -p "$root/udc/5100000.udc-controller"
 printf '1\n' > "$root/vbus"
 printf 'not attached\n' > "$root/udc/5100000.udc-controller/state"
-if SDCARD_PATH="$root/card" NP_CABLE_CONFIGFS="$root/config" NP_CABLE_FFS_DIR="$root/ffs" \
-   NP_CABLE_UDC_DIR="$root/udc" NP_CABLE_VBUS="$root/vbus" "$root/netplay-cable.elf" --repair; then
-	echo 'repair accepted a bind the controller never attached to' >&2
-	exit 1
-fi
-test -f "$state/usb_restore"
+start=$(date +%s)
+SDCARD_PATH="$root/card" NP_CABLE_CONFIGFS="$root/config" NP_CABLE_FFS_DIR="$root/ffs" \
+    NP_CABLE_UDC_DIR="$root/udc" NP_CABLE_VBUS="$root/vbus" "$root/netplay-cable.elf" --repair
+test $(( $(date +%s) - start )) -le 2 || { echo 'repair retried a charger-only bind' >&2; exit 1; }
+test ! -e "$state/usb_restore"
+test "$(cat "$gadget/UDC")" = '5100000.udc-controller'
 
+# Again with a host that had configured the controller.
+printf 'udc=5100000.udc-controller\n' > "$state/usb_restore"
+mkdir -p "$gadget/functions/ffs.cable"
+ln -s "$gadget/functions/ffs.cable" "$gadget/configs/c.1/ffs.cable"
 printf 'configured\n' > "$root/udc/5100000.udc-controller/state"
 SDCARD_PATH="$root/card" NP_CABLE_CONFIGFS="$root/config" NP_CABLE_FFS_DIR="$root/ffs" \
     NP_CABLE_UDC_DIR="$root/udc" NP_CABLE_VBUS="$root/vbus" "$root/netplay-cable.elf" --repair

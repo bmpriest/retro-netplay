@@ -186,6 +186,8 @@ choice is not exposed yet. The current daemon uses an explicit `--role host` or
    `adb`; a pulled and re-plugged cable relinks. **Passed 2026-11-14** (results
    in `docs/cable.md`).
 4. **Role independence.** Either cable direction with either device hosting.
+   **Daemon side passed 2026-11-14** (`--role auto`); netplay Host/Join over
+   each direction is checked with the app in phase 5.
 5. **App integration.** Menu entries, `link=` session key, broker status, the
    watchdog's repair record, hints.
 6. **Matrix cells** over the cable: the systems tests and DS races, Brick to

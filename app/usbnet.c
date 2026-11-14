@@ -1308,19 +1308,22 @@ static bool cp_udc_attached(const char* udc) {
 
 /* The UDC attribute reading back the controller's name is not proof that the
  * gadget started. Binding while the sunxi UDC is still tearing down the last
- * binding - a daemon restarted right after its predecessor was SIGKILLed, when
- * the kernel has just re-attached g1 by itself - logs "failed to start g1: -19"
- * yet leaves the name in place, and the controller then sits "not attached"
- * with VBUS present until another unbind and bind (seen 2 runs in 4,
- * 2026-11-14). So with VBUS present, the controller has to leave "not
- * attached"; if it does not, release it, let it settle, and bind again. Without
- * VBUS there is nothing to attach to, and the read-back is all there is. */
-static bool cp_brick_bind(const char* path, const char* udc) {
+ * binding - a daemon restarted right after its predecessor was SIGKILLed, or
+ * started a few seconds after a stop - logs "failed to start g1: -19" yet
+ * leaves the name in place, and the controller then sits "not attached" with a
+ * host on the cable until another unbind and bind (2 runs in 4, 2026-11-14).
+ *
+ * `expect_host` says a USB host had configured the controller just before it
+ * was released, which is when both failures were seen. Only then must the new
+ * binding attach: VBUS alone cannot tell a host from a wall charger (the AXP
+ * reports both as type USB), and a charger never enumerates anything. A VBUS
+ * that goes away during the wait is an unplug, not a failed bind. */
+static bool cp_brick_bind(const char* path, const char* udc, bool expect_host) {
 	for (int attempt = 1; attempt <= CP_BIND_ATTEMPTS; attempt++) {
 		if (!cp_brick_bind_once(path, udc)) return false;
-		if (!cp_vbus_present()) return true;
+		if (!expect_host) return true;
 		for (int tick = 0; tick < CP_UDC_ATTACH_TICKS; tick++) {
-			if (cp_udc_attached(udc)) return true;
+			if (cp_udc_attached(udc) || !cp_vbus_present()) return true;
 			usleep(CP_TICK_MS * 1000);
 		}
 		cp_log("g1 bound to %s but the controller never attached (attempt %d); rebinding\n",
@@ -1361,6 +1364,7 @@ static bool cp_brick_repair(void) {
 	}
 	char bound[CP_NAME_MAX] = "";
 	if (!cp_brick_read_udc(udc_path, bound, sizeof(bound))) return false;
+	bool host_seen = bound[0] && cp_udc_configured(bound);
 	if (linked) {
 		if (!cp_brick_unbind(udc_path)) {
 			cp_log("cannot release g1; leaving repair record and function intact\n");
@@ -1373,7 +1377,7 @@ static bool cp_brick_repair(void) {
 		cp_log("g1 is bound to unexpected UDC %s; keeping repair record\n", bound);
 		return false;
 	}
-	if (!bound[0] && !cp_brick_bind(udc_path, udc)) {
+	if (!bound[0] && !cp_brick_bind(udc_path, udc, host_seen)) {
 		cp_log("cannot rebind g1 to %s; keeping repair record\n", udc);
 		return false;
 	}
@@ -1388,6 +1392,17 @@ static bool cp_brick_repair(void) {
 	cp_log("stock g1 rebound; adb function preserved\n");
 	return true;
 }
+
+/* --role auto: offer the gadget on the bottom socket and watch the top one.
+ * The Brick's top socket is host-only and its bottom socket is the only device
+ * port, so a working cable (one Brick's top to the other's bottom) shows up on
+ * exactly one side's top port: that side becomes the USB host and the other
+ * stays the gadget. No election is needed, and nothing can race. The choice is
+ * made once per daemon; a cable re-plugged the same way round relinks, one
+ * turned round needs the daemon restarted. */
+static bool cp_auto;
+static bool cp_auto_to_host;
+static bool cp_host_scan(char* node_out, size_t cap, unsigned* bus_out);
 
 static bool cp_gadget_start(char* err, int errlen) {
 	char udc_path[CP_LINE_MAX], function_path[CP_LINE_MAX], link_path[CP_LINE_MAX];
@@ -1427,6 +1442,7 @@ static bool cp_gadget_start(char* err, int errlen) {
 		snprintf(err, errlen, "cannot save stock gadget controller");
 		return false;
 	}
+	bool host_seen = cp_udc_configured(udc);
 	if (!cp_brick_unbind(udc_path)) {
 		snprintf(err, errlen, "stock gadget would not release its controller");
 		return false;
@@ -1435,7 +1451,7 @@ static bool cp_gadget_start(char* err, int errlen) {
 		snprintf(err, errlen, "cannot add cable beside adb: %s", strerror(errno));
 		return false;
 	}
-	if (!cp_brick_bind(udc_path, udc)) {
+	if (!cp_brick_bind(udc_path, udc, host_seen)) {
 		snprintf(err, errlen, "g1 could not bind with cable function");
 		return false;
 	}
@@ -1522,6 +1538,14 @@ static void cp_gadget_pump(void) {
 				cp_log("negotiated %u-byte packets\n", now_maxpacket);
 				maxpacket = now_maxpacket;
 			}
+			if (cp_auto && cp_status.state != CP_STATE_UP && !cp_udc_configured(cp_status.udc)) {
+				char node[CP_LINE_MAX];
+				if (cp_host_scan(node, sizeof(node), NULL)) {
+					cp_log("auto: a cable peer is on the top port (%s); becoming the USB host\n", node);
+					cp_auto_to_host = true;
+					break;
+				}
+			}
 			if (!cp_slow_tick(cp_udc_configured(cp_status.udc) && cp_peer_recent(), cp_rx_failed)) break;
 		}
 	}
@@ -1540,6 +1564,13 @@ static void cp_gadget_run(void) {
 	char err[CP_ERROR_MAX];
 
 	if (!cp_gadget_start(err, sizeof(err))) {
+		if (cp_auto) {
+			/* The top port can still carry the link. */
+			cp_log("auto: no gadget on the bottom port (%s); using the top port only\n", err);
+			cp_gadget_teardown();
+			cp_auto_to_host = true;
+			return;
+		}
 		cp_fail("%s", err);
 		cp_gadget_teardown();
 		return;
@@ -2072,7 +2103,7 @@ static void cp_host_run(void) {
 //////////////////////////////////////////////////////////////////////////////
 
 static void cp_usage(FILE* out) {
-	fprintf(out, "usage: netplay-cable --role gadget|host | --stop | --repair | --probe\n");
+	fprintf(out, "usage: netplay-cable --role auto|gadget|host | --stop | --repair | --probe\n");
 }
 
 int main(int argc, char** argv) {
@@ -2082,7 +2113,11 @@ int main(int argc, char** argv) {
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--role") && i + 1 < argc) {
-			if (!cp_role_from_name(argv[++i], &role)) {
+			if (!strcmp(argv[i + 1], "auto")) {
+				i++;
+				cp_auto = true;
+				role = CP_ROLE_GADGET;   /* until the top port says otherwise */
+			} else if (!cp_role_from_name(argv[++i], &role)) {
 				fprintf(stderr, "netplay-cable: unknown role '%s'\n", argv[i]);
 				return 2;
 			}
@@ -2143,7 +2178,7 @@ int main(int argc, char** argv) {
 	/* Own our output before saying anything: the file is opened for append
 	 * before this process exists, so rotating it is only correct here. */
 	cp_log_open();
-	cp_log("starting as %s (pid %d)\n", cp_role_name(role), (int)getpid());
+	cp_log("starting as %s (pid %d)\n", cp_auto ? "auto" : cp_role_name(role), (int)getpid());
 
 	/* A pidfile left by a daemon that crashed, or by a reboot that outran its
 	 * cleanup, names nobody. It is cleared rather than obeyed, so the next
@@ -2188,8 +2223,16 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
-	if (role == CP_ROLE_GADGET) cp_gadget_run();
-	else cp_host_run();
+	if (role == CP_ROLE_GADGET) {
+		cp_gadget_run();
+		if (cp_auto_to_host && !cp_stopping) {
+			cp_status_init(&cp_status, CP_ROLE_HOST);
+			cp_publish();
+			cp_host_run();
+		}
+	} else {
+		cp_host_run();
+	}
 
 	/* Both artifacts go on every path out, including the one where bring-up
 	 * failed: a status file left behind is a session the next app believes is
