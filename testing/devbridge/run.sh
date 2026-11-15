@@ -21,7 +21,9 @@
 #
 # HOST_ADDR is the device that hosts the armed session (Player 1), GUEST_ADDR
 # the one that joined. Either may be adb:SERIAL for a device on USB ADB, which
-# mixes with an SSH one (a NextUI Brick on USB against a spruce device on WiFi). Both must already be armed together and sitting in
+# mixes with an SSH one (a NextUI Brick on USB against a spruce device on WiFi).
+# ADDR:PORT reaches one device on its own SSH port, such as a tunnel through
+# the other device and the USB cable when its WiFi drops. Both must already be armed together and sitting in
 # DevBridge, not in the Netplay app. See README.md.
 #
 # Tests use three placeholders, filled in here:
@@ -75,8 +77,9 @@ fi
 
 sshd() {
 	addr=$1; shift
-	u=$user
+	u=$user sp=$port
 	case $addr in *@*) u=${addr%@*}; addr=${addr##*@} ;; esac
+	case $addr in adb:*) ;; *:*) sp=${addr##*:}; addr=${addr%:*} ;; esac
 	# adb shell ends its lines with CRLF.
 	case $addr in adb:*)
 		adb -s "${addr#adb:}" shell "$@" | tr -d '\r'
@@ -84,16 +87,16 @@ sshd() {
 	esac
 	if [ -n "$askpass" ]; then
 		# Mixed fleets: some devices take the key, others only the password.
-		ssh -p "$port" -i "$identity" -o BatchMode=yes -o ConnectTimeout=10 \
+		ssh -p "$sp" -i "$identity" -o BatchMode=yes -o ConnectTimeout=10 \
 			-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
 			"$u@$addr" "$@" 2>/dev/null && return
 		SSH_ASKPASS=$askpass SSH_ASKPASS_REQUIRE=force DEVBRIDGE_PASSWORD=$DEVBRIDGE_PASSWORD \
-			setsid -w ssh -p "$port" -o ConnectTimeout=10 -o PubkeyAuthentication=no \
+			setsid -w ssh -p "$sp" -o ConnectTimeout=10 -o PubkeyAuthentication=no \
 			-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
 			"$u@$addr" "$@"
 		return
 	fi
-	ssh -p "$port" -i "$identity" -o BatchMode=yes -o ConnectTimeout=10 \
+	ssh -p "$sp" -i "$identity" -o BatchMode=yes -o ConnectTimeout=10 \
 		-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
 		"$u@$addr" "$@"
 }
@@ -142,8 +145,9 @@ play_only() {
 	fi
 }
 
-# After each WAIT_FOR game, make both devices prove they are in the game
-# the test just opened. A device stuck at spruce's save-transfer prompt,
+# After each WAIT_FOR game, make the devices it waited for prove they are in
+# the game the test just opened (host:WAIT_FOR game checks only the host: in
+# dsp-mkds the guest launches after it). A device stuck at spruce's save-transfer prompt,
 # still in the previous game, or back in a menu fails the test here rather
 # than playing a different game from its partner for minutes.
 sync_guard() {
@@ -155,9 +159,33 @@ sync_guard() {
 		}
 		{ print }
 		/^[a-z]+:WAIT_FOR game/ {
-			if (rom != "") print "all:TRM sh '"$HELPERS"'/sync.sh game \"" rom "\""
+			role = $0; sub(/:.*/, "", role)
+			if (rom != "") print role ":TRM sh '"$HELPERS"'/sync.sh game \"" rom "\""
 		}
 	'
+}
+
+# A screen that depends on the partner too (the host's core options, such as
+# Gambatte's palette, reach a NextUI guest) has its reference at
+# refs/<platform>/with-<partner platform>/NAME.png, used in place of
+# refs/<platform>/NAME.png when it exists. Not while recording: a recorded
+# screen lands at refs/<platform>/NAME.png, to be moved by hand.
+pair_refs() {
+	awk -v refs="$HERE/refs" -v hp="$host_platform" -v gp="$guest_platform" '
+		function exists(f,   line) { if ((getline line < f) > 0) { close(f); return 1 } return 0 }
+		{
+			out = ""; rest = $0
+			while (match(rest, /\/refs\/[^\/ ]+\/[^\/ ]+\.png/)) {
+				tok = substr(rest, RSTART, RLENGTH)
+				split(tok, t, "/"); plat = t[3]; name = t[4]
+				partner = (plat == hp) ? gp : hp
+				alt = refs "/" plat "/with-" partner "/" name
+				if (exists(alt)) tok = "/refs/" plat "/with-" partner "/" name
+				out = out substr(rest, 1, RSTART - 1) tok
+				rest = substr(rest, RSTART + RLENGTH)
+			}
+			print out rest
+		}'
 }
 
 push_helpers() {
@@ -174,6 +202,7 @@ push_helpers() {
 devbridge_target() {
 	case $1 in
 	adb:*) echo "--adb ${1#adb:}=$2" ;;
+	*:*) echo "--connect ${1%:*}:$2:${1##*:}" ;;
 	*) echo "--connect $1:$2" ;;
 	esac
 }
@@ -235,7 +264,7 @@ for test in "$@"; do
 				print p[1] ":SCREEN rec__" dir "__" ref
 			}'
 		else
-			cat
+			pair_refs
 		fi
 	} | sync_guard > "$script"
 	if [ -n "${DEVBRIDGE_ATTEMPT_DIR:-}" ]; then

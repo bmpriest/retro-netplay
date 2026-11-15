@@ -63,6 +63,10 @@ USB hosting a spruce device on WiFi is
 
     DEVBRIDGE_PASSWORD=... testing/devbridge/run.sh --user spruce adb:SERIAL GUEST testing/devbridge/sor2.test
 
+A device given as `ADDR:PORT` is reached on that SSH port. Over the USB cable,
+when one device's WiFi drops, tunnel to it through the other
+(`ssh -N -L 127.0.0.1:2244:10.77.0.2:22 root@OTHER`) and pass `127.0.0.1:2244`.
+
 run.sh maps the tests' NextUI ROM folders to spruce's (`Sega Genesis (MD)/` to
 `MD/`) and keeps spruce references in `refs/spruce-<platform>`; `quit.sh`
 quits spruce's RetroArch. A step spruce needs done differently is written
@@ -149,6 +153,14 @@ reverse roles need their own references:
 
 Record mode waits out each `VERIFY_WAIT` timeout and captures the screen in its
 place. It writes over references, so look at what it recorded before keeping it.
+
+Once recorded, a reference holds across runs; only a new platform, role or
+pairing needs new ones. A few screens depend on the partner too: the host's
+core options reach a NextUI guest, so Tetris under a spruce host shows
+spruce's grey palette rather than NextUI's green. Those go in
+`refs/<platform>/with-<partner platform>/`, which run.sh uses ahead of
+`refs/<platform>/` when the file is there (recording still writes to
+`refs/<platform>/`; move such captures by hand).
 
 **Checks are measured, not guessed.** DevBridge scores a screen by the mean
 pixel difference of a 64x48 greyscale reduction: 0 is identical. Animated
