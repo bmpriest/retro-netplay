@@ -1265,7 +1265,7 @@ echo "== a mid-frame wait must outlive a burst bigger than the frame budget"
 PORT5=$((PORT + 4))
 printf 'role=host\nport=%s\nmode=link\n'                  "$PORT5" > "$OUT/h5.session"
 printf 'role=client\nport=%s\npeer=127.0.0.1\nmode=link\n' "$PORT5" > "$OUT/c5.session"
-FAKE_CORE_BURST=200 \
+FAKE_CORE_BURST=200 FAKE_CORE_BURST_AFTER_PEER=1 \
 NETPLAY_REAL_CORE="$OUT/fake_libretro.so" NETPLAY_SESSION="$OUT/h5.session" \
 	"$OUT/harness" "$SHIM" 120 15 > "$OUT/h5.log" 2>&1 &
 H5=$!
@@ -1277,6 +1277,7 @@ C5=$!
 wait $H5 2>/dev/null || true
 wait $C5 2>/dev/null || true
 expect "$OUT/c5.log" "core:burst_wait_done" "client received the whole burst inside one frame"
+expect "$OUT/c5.log" "core:burst_wait_done got=200 ([1-9][0-9]* while waiting)" "the host's burst arrived while the client waited mid-frame"
 if grep -q "burst_wait_timeout" "$OUT/c5.log"; then
 	echo "  MISS mid-frame delivery stalled at the frame budget"
 	fail=1

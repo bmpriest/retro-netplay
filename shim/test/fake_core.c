@@ -46,6 +46,7 @@ static unsigned                       np_seq;
 static retro_netpacket_poll_receive_t np_poll_receive;
 static int np_in_receive;
 static unsigned np_rx_count;
+static unsigned np_rx_burst;   /* the peer's FAKE_CORE_BURST packets ("B...") */
 
 static void np_start(uint16_t client_id, retro_netpacket_send_t send_fn,
                      retro_netpacket_poll_receive_t poll_fn) {
@@ -58,6 +59,7 @@ static void np_start(uint16_t client_id, retro_netpacket_send_t send_fn,
 
 static void np_receive(const void* buf, size_t len, uint16_t client_id) {
 	np_rx_count++;
+	if (len && ((const char*)buf)[0] == 'B') np_rx_burst++;
 	printf("core:np_recv from=%u len=%zu data=%.*s\n",
 	       client_id, len, (int)len, (const char*)buf);
 	/* A core is allowed to poll from inside its own receive handler. The shim
@@ -276,14 +278,22 @@ void retro_run(void) {
 	 * FAKE_CORE_BURST_WAIT: then wait inside this same retro_run until the
 	 * peer's burst has all arrived, as armGBA's exact link timing waits
 	 * mid-frame for a transfer answer. Bounded, so a shim that stops
-	 * delivering mid-frame fails instead of hanging the suite. */
+	 * delivering mid-frame fails instead of hanging the suite.
+	 * FAKE_CORE_BURST_AFTER_PEER: hold this side's burst until the peer's
+	 * has started arriving. With the waiter's side sending first, the other
+	 * burst lands while the waiter is inside its frame - every run, not only
+	 * when the two sides' first linked frames happen to line up.
+	 * Only burst packets count, whenever they arrived: counting everything
+	 * from the moment of sending missed packets that came earlier (a
+	 * spurious timeout) and counted the periodic P packets (a spurious
+	 * pass). */
 	{
 		static int burst_done = 0;
 		const char* burst = getenv("FAKE_CORE_BURST");
-		if (np_started && np_send && burst && !burst_done) {
+		if (np_started && np_send && burst && !burst_done &&
+		    (!getenv("FAKE_CORE_BURST_AFTER_PEER") || np_rx_burst > 0)) {
 			burst_done = 1;
 			int count = atoi(burst);
-			unsigned before = np_rx_count;
 			for (int i = 0; i < count; i++) {
 				char msg[32];
 				int n = snprintf(msg, sizeof(msg), "B%u-%d", np_local_id, i);
@@ -291,16 +301,18 @@ void retro_run(void) {
 			}
 			if (getenv("FAKE_CORE_BURST_WAIT") && np_poll_receive) {
 				long waited_ms = 0;
-				while (np_rx_count - before < (unsigned)count && waited_ms < 4000) {
+				unsigned at_start = np_rx_burst;
+				while (np_rx_burst < (unsigned)count && waited_ms < 4000) {
 					np_poll_receive();
-					if (np_rx_count - before >= (unsigned)count) break;
+					if (np_rx_burst >= (unsigned)count) break;
 					usleep(1000);
 					waited_ms++;
 				}
-				if (np_rx_count - before >= (unsigned)count)
-					printf("core:burst_wait_done got=%u\n", np_rx_count - before);
+				if (np_rx_burst >= (unsigned)count)
+					printf("core:burst_wait_done got=%u (%u while waiting)\n",
+					       np_rx_burst, np_rx_burst - at_start);
 				else
-					printf("core:burst_wait_timeout got=%u of %d\n", np_rx_count - before, count);
+					printf("core:burst_wait_timeout got=%u of %d\n", np_rx_burst, count);
 				fflush(stdout);
 			}
 		}
