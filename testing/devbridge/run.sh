@@ -218,6 +218,23 @@ if [ "${DEVBRIDGE_HELPERS_READY:-0}" != 1 ]; then
 	push_helpers "$host"
 	push_helpers "$guest"
 fi
+
+# An armed cable session stays armed with the cable unplugged (a replug
+# relinks), so "armed" says nothing about the link. Before anything launches,
+# a cable session must be linked on both devices; otherwise the guest's game
+# waits for a host it cannot reach. (2026-11-15: a suite started with both
+# devices on chargers.)
+cable_state() { sshd "$1" "sh $HELPERS/ctl.sh status 2>/dev/null" | sed -n 's/^cable=//p'; }
+if [ $play_only = 0 ]; then
+	hc=$(cable_state "$host"); gc=$(cable_state "$guest")
+	if { [ -n "$hc" ] && [ "$hc" != off ]; } || { [ -n "$gc" ] && [ "$gc" != off ]; }; then
+		if [ "$hc" != linked ] || [ "$gc" != linked ]; then
+			echo "cable session not linked: host cable=${hc:-?}, guest cable=${gc:-?} - check the cable before testing" >&2
+			exit 1
+		fi
+		echo "cable linked on both devices"
+	fi
+fi
 mkdir -p "$OUT" "$HERE/refs/$host_platform" "$HERE/refs/$guest_platform"
 
 status=0

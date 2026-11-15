@@ -105,15 +105,18 @@ a game that cached card state.
 
 - *(backlog)* Bind a session to its peer: authenticated pairing, admission tied
   to the gameplay sockets, no queued socket taking over after a disconnect.
-- *(backlog)* Discovery records with last-seen expiry, and a bounded wait for
-  a fresh supplicant scan instead of whatever was cached.
+- *(backlog)* A bounded wait for a fresh supplicant scan instead of whatever was
+  cached. (Discovery records already expire: a host silent for 6 s leaves the
+  Join list, 2026-11-15.)
 - *(backlog)* After the app restarts, decide from observable hostapd, radio and
   session state, never from cached UI flags; never regenerate an SSID or drop an
   AP that serves a live peer.
 - *(backlog)* Failed arm checks return to the Host or Join flow they came from;
   recovery text says which side is sending and which receiving.
-- *(backlog)* Checkpoint writes off the emulation thread, and garbage
-  collection of old host checkpoints and guest volatile save directories.
+- Done 2026-11-15: checkpoint writes run on a worker thread (a PCSX checkpoint
+  cost the emulation thread 26 ms every ~5 s on a Brick; MD 4 ms), and each
+  game start clears other sessions' host checkpoints and dead guests' save
+  directories from /tmp; a guest removes its own on exit.
 - The state hash needs a volatile-field exclusion list before it can be trusted
   for RTC cartridges (Gambatte writes the host clock into state at power-on).
 - `CORE MISMATCH` folds in `library_version`, so builds differing only in flags

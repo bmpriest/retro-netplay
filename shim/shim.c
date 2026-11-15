@@ -29,6 +29,7 @@
 #include <fcntl.h>
 #include <gnu/libc-version.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -811,6 +812,75 @@ static void load_option_overrides(const char* session_path) {
 	if (option_override_count) option_update_pending = 1;
 }
 
+static bool pid_alive(long pid) {
+	return pid > 0 && (kill((pid_t)pid, 0) == 0 || errno == EPERM);
+}
+
+/* Depth-first; these directories hold a core's save files, nothing deep. */
+static void remove_tree(const char* path) {
+	DIR* d = opendir(path);
+	if (d) {
+		struct dirent* e;
+		while ((e = readdir(d))) {
+			if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+			char child[512];
+			if (snprintf(child, sizeof(child), "%s/%s", path, e->d_name) >= (int)sizeof(child)) continue;
+			struct stat st;
+			if (lstat(child, &st) == 0 && S_ISDIR(st.st_mode)) remove_tree(child);
+			else unlink(child);
+		}
+		closedir(d);
+	}
+	rmdir(path);
+}
+
+/* The process id at the end of a guest save directory's name: "<session>-<pid>"
+ * or "process-<pid>", and before 2026-11-15 "<32 hex session><pid>". */
+static long guest_dir_pid(const char* rest) {
+	const char* dash = strrchr(rest, '-');
+	const char* digits = dash ? dash + 1 : (strlen(rest) > 32 ? rest + 32 : NULL);
+	if (!digits || !*digits) return 0;
+	for (const char* p = digits; *p; p++) if (*p < '0' || *p > '9') return 0;
+	return atol(digits);
+}
+
+/* /tmp is RAM on these devices. A host checkpoint outlives a clean exit on
+ * purpose, so a relaunched host resumes its session - but only for that
+ * session; and a guest's save directory is only for its process. Clear what
+ * belongs to other sessions or to processes that are gone. */
+static void collect_stale_session_files(void) {
+	DIR* d = opendir("/tmp");
+	if (!d) return;
+	int removed = 0;
+	struct dirent* e;
+	while ((e = readdir(d))) {
+		char path[512];
+		const char* name = e->d_name;
+		if (!strncmp(name, "netplay-host-", 13)) {
+			const char* rest = name + 13;
+			const char* tmp = strstr(rest, ".state.tmp.");
+			bool stale;
+			if (tmp) stale = !pid_alive(atol(tmp + 11));
+			else {
+				size_t n = strlen(rest);
+				if (n <= 6 || strcmp(rest + n - 6, ".state")) continue;
+				stale = !session_id[0] || n - 6 != strlen(session_id) ||
+				        strncmp(rest, session_id, n - 6);
+			}
+			if (!stale || snprintf(path, sizeof(path), "/tmp/%s", name) >= (int)sizeof(path)) continue;
+			if (unlink(path) == 0) removed++;
+		} else if (!strncmp(name, "netplay-guest-", 14)) {
+			long pid = guest_dir_pid(name + 14);
+			if (!pid || pid_alive(pid)) continue;
+			if (snprintf(path, sizeof(path), "/tmp/%s", name) >= (int)sizeof(path)) continue;
+			remove_tree(path);
+			removed++;
+		}
+	}
+	closedir(d);
+	if (removed) shim_log("cleared %d stale checkpoint or guest save file(s) from /tmp\n", removed);
+}
+
 static void load_session_id(const char* path) {
 	session_id[0] = checkpoint_path[0] = '\0';
 	FILE* f = fopen(path, "r");
@@ -1384,6 +1454,7 @@ static void ensure_loaded(void) {
 	if (session_active) {
 		load_option_overrides(session);
 		load_session_id(session);
+		collect_stale_session_files();
 
 		// get_system_info is resolved above, so the core can be asked what it is
 		// before anything else happens. Both sides run the same ROM, so they
@@ -1455,8 +1526,8 @@ static void ensure_loaded(void) {
 		if (netplay_mode && !ra_mode) apply_required_options();
 		if (netplay_mode && NetLink_getRole() == NETLINK_ROLE_CLIENT) {
 			snprintf(guest_save_dir, sizeof(guest_save_dir),
-			         "/tmp/netplay-guest-%s%ld",
-			         session_id[0] ? session_id : "process-", (long)getpid());
+			         "/tmp/netplay-guest-%s-%ld",
+			         session_id[0] ? session_id : "process", (long)getpid());
 			if (mkdir(guest_save_dir, 0700) != 0 && errno != EEXIST) {
 				shim_log("WARNING: cannot create volatile guest save directory %s: %s\n",
 				         guest_save_dir, strerror(errno));
@@ -2254,24 +2325,48 @@ static void set_checkpoint_candidate(void* data, size_t len, uint32_t frame, uin
 	checkpoint_candidate_hash = hash;
 }
 
-static bool promote_checkpoint(void) {
-	if (!checkpoint_path[0] || !checkpoint_candidate || !checkpoint_candidate_len) return false;
+/* A confirmed checkpoint is written off the emulation thread. Hashing and
+ * writing a whole state is a few hundred KB for SNES but 4.5 MB for PCSX, and
+ * on the emulation thread that came out of a 16 ms frame every few seconds.
+ * The emulation thread hands over the buffer it already owns plus the core
+ * identity (cores are not thread-safe, so that is read here, not in the
+ * worker); the worker hashes, writes, fsyncs and renames. One job is pending at
+ * most: a newer confirmed state supersedes one not yet started. */
+typedef struct {
+	void*    data;
+	size_t   len;
+	uint32_t frame;
+	uint32_t identity;
+} CheckpointJob;
+
+static pthread_t       checkpoint_thread;
+static bool            checkpoint_thread_started;
+static pthread_mutex_t checkpoint_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  checkpoint_wake  = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t  checkpoint_idle  = PTHREAD_COND_INITIALIZER;
+static CheckpointJob   checkpoint_pending;   /* data == NULL: nothing queued */
+static bool            checkpoint_busy;
+static bool            checkpoint_quit;
+
+static bool write_checkpoint_file(const CheckpointJob* job) {
+	struct timespec t0, t1;
+	clock_gettime(CLOCK_MONOTONIC, &t0);
 	char tmp[224];
 	snprintf(tmp, sizeof(tmp), "%s.tmp.%ld", checkpoint_path, (long)getpid());
 	int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
 	if (fd < 0) return false;
 	CheckpointHeader h = {
 		.magic = CHECKPOINT_MAGIC, .version = 2,
-		.core_identity = core_identity_logged(false),
-		.state_size = (uint32_t)checkpoint_candidate_len,
-		.frame = checkpoint_candidate_frame,
+		.core_identity = job->identity,
+		.state_size = (uint32_t)job->len,
+		.frame = job->frame,
 		/* Of the bytes on disk, which load_checkpoint verifies - not the
 		 * comparison hash, which for some cores covers less (check_hash). */
-		.state_hash = hash_bytes(checkpoint_candidate, checkpoint_candidate_len),
+		.state_hash = hash_bytes(job->data, job->len),
 	};
 	memcpy(h.rom_sha256, rom_sha256, sizeof(h.rom_sha256));
-	const uint8_t* parts[2] = { (const uint8_t*)&h, checkpoint_candidate };
-	size_t lengths[2] = { sizeof(h), checkpoint_candidate_len };
+	const uint8_t* parts[2] = { (const uint8_t*)&h, job->data };
+	size_t lengths[2] = { sizeof(h), job->len };
 	bool ok = true;
 	for (int part = 0; part < 2 && ok; part++) {
 		const uint8_t* p = parts[part];
@@ -2287,9 +2382,84 @@ static bool promote_checkpoint(void) {
 	if (close(fd) != 0) ok = false;
 	if (ok) ok = rename(tmp, checkpoint_path) == 0;
 	if (!ok) unlink(tmp);
-	if (ok) shim_log("confirmed host checkpoint promoted at frame %u\n", h.frame);
+	clock_gettime(CLOCK_MONOTONIC, &t1);
+	long ms = (t1.tv_sec - t0.tv_sec) * 1000L + (t1.tv_nsec - t0.tv_nsec) / 1000000L;
+	if (ok) shim_log("confirmed host checkpoint promoted at frame %u (%zu bytes, %ld ms off the emulation thread)\n",
+	                 h.frame, job->len, ms);
 	else shim_log("could not persist confirmed host checkpoint: %s\n", strerror(errno));
 	return ok;
+}
+
+static void* checkpoint_worker(void* unused) {
+	(void)unused;
+	pthread_mutex_lock(&checkpoint_mutex);
+	for (;;) {
+		while (!checkpoint_pending.data && !checkpoint_quit)
+			pthread_cond_wait(&checkpoint_wake, &checkpoint_mutex);
+		/* A queued job is written before quitting: it is the last confirmed
+		 * state, the one a relaunched host resumes from. */
+		if (!checkpoint_pending.data) break;
+		CheckpointJob job = checkpoint_pending;
+		checkpoint_pending.data = NULL;
+		checkpoint_busy = true;
+		pthread_mutex_unlock(&checkpoint_mutex);
+		write_checkpoint_file(&job);
+		free(job.data);
+		pthread_mutex_lock(&checkpoint_mutex);
+		checkpoint_busy = false;
+		pthread_cond_broadcast(&checkpoint_idle);
+	}
+	pthread_mutex_unlock(&checkpoint_mutex);
+	return NULL;
+}
+
+/* Hands the confirmed candidate to the writer; the candidate is consumed. */
+static bool promote_checkpoint(void) {
+	if (!checkpoint_path[0] || !checkpoint_candidate || !checkpoint_candidate_len) return false;
+	CheckpointJob job = {
+		.data = checkpoint_candidate, .len = checkpoint_candidate_len,
+		.frame = checkpoint_candidate_frame, .identity = core_identity_logged(false),
+	};
+	checkpoint_candidate = NULL;
+	checkpoint_candidate_len = 0;
+	if (!checkpoint_thread_started) {
+		if (pthread_create(&checkpoint_thread, NULL, checkpoint_worker, NULL) == 0) {
+			checkpoint_thread_started = true;
+		} else {
+			/* No thread: write it here, as before. */
+			bool ok = write_checkpoint_file(&job);
+			free(job.data);
+			return ok;
+		}
+	}
+	pthread_mutex_lock(&checkpoint_mutex);
+	free(checkpoint_pending.data);   /* superseded before it was started */
+	checkpoint_pending = job;
+	pthread_cond_signal(&checkpoint_wake);
+	pthread_mutex_unlock(&checkpoint_mutex);
+	return true;
+}
+
+/* Waits until nothing is queued or being written: before the checkpoint file
+ * is removed, so a write in flight cannot rename a stale state back. */
+static void checkpoint_writer_flush(void) {
+	if (!checkpoint_thread_started) return;
+	pthread_mutex_lock(&checkpoint_mutex);
+	while (checkpoint_pending.data || checkpoint_busy)
+		pthread_cond_wait(&checkpoint_idle, &checkpoint_mutex);
+	pthread_mutex_unlock(&checkpoint_mutex);
+}
+
+/* Writes what is queued, then ends the worker. */
+static void checkpoint_writer_stop(void) {
+	if (!checkpoint_thread_started) return;
+	pthread_mutex_lock(&checkpoint_mutex);
+	checkpoint_quit = true;
+	pthread_cond_signal(&checkpoint_wake);
+	pthread_mutex_unlock(&checkpoint_mutex);
+	pthread_join(checkpoint_thread, NULL);
+	checkpoint_thread_started = false;
+	checkpoint_quit = false;
 }
 
 static bool load_checkpoint(void** data, size_t* len, uint32_t* frame) {
@@ -2599,6 +2769,7 @@ static void netplay_handshake(void) {
 		free(buf);
 		buf = NULL;
 		restored = false;
+		checkpoint_writer_flush();
 		unlink(checkpoint_path);
 		shim_log("discarded unusable host checkpoint; syncing live state\n");
 		if (!capture_authoritative_state(&buf, &sz, NULL)) {
@@ -3661,6 +3832,13 @@ void retro_deinit(void) {
 	}
 	if (session_active && !ra_mode) NetLink_stop();
 	if (ra_mode) RaProto_stop();
+	checkpoint_writer_stop();
+	if (guest_save_dir[0]) {
+		/* Core-managed saves on the guest are volatile by design; nothing
+		 * reads them once the game has ended. */
+		remove_tree(guest_save_dir);
+		guest_save_dir[0] = '\0';
+	}
 	free(checkpoint_candidate);
 	checkpoint_candidate = NULL;
 	checkpoint_candidate_len = 0;

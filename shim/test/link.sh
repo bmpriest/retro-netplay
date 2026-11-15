@@ -1283,6 +1283,38 @@ if grep -q "burst_wait_timeout" "$OUT/c5.log"; then
 fi
 
 echo
+echo "== /tmp keeps only this session's checkpoint and live guests' saves"
+PORT40=$((PORT + 49))
+SID40=$(printf '%032x' "$PORT40")
+OTHER=$(printf '%032x' $((PORT40 + 1)))
+printf 'role=host\nport=%s\nmode=netplay\nsession_id=%s\n' "$PORT40" "$SID40" > "$OUT/h40.session"
+printf 'role=client\nport=%s\npeer=127.0.0.1\nmode=netplay\nsession_id=%s\n' "$PORT40" "$SID40" > "$OUT/c40.session"
+rm -f "/tmp/netplay-host-$SID40.state"
+: > "/tmp/netplay-host-$OTHER.state"
+mkdir -p "/tmp/netplay-guest-$OTHER-999999" "/tmp/netplay-guest-${OTHER}999998" "/tmp/netplay-guest-$OTHER-$$"
+: > "/tmp/netplay-guest-$OTHER-999999/save.srm"
+HARNESS_BUTTONS=17 NETPLAY_REAL_CORE="$OUT/fake_libretro.so" NETPLAY_SESSION="$OUT/h40.session" \
+	"$OUT/harness" "$SHIM" 700 5 > "$OUT/h40.log" 2>&1 &
+H40=$!
+sleep 0.3
+HARNESS_BUTTONS=34 NETPLAY_REAL_CORE="$OUT/fake_libretro.so" NETPLAY_SESSION="$OUT/c40.session" \
+	"$OUT/harness" "$SHIM" 700 5 > "$OUT/c40.log" 2>&1 &
+C40=$!
+wait $H40 2>/dev/null || true
+wait $C40 2>/dev/null || true
+expect "$OUT/h40.log" "cleared [0-9]* stale checkpoint or guest save" "host cleared stale /tmp files"
+gc_check() { # <test> <description>
+	if eval "$1"; then echo "  ok   $2"; else echo "  MISS $2"; fail=1; fi
+}
+gc_check '[ ! -e "/tmp/netplay-host-$OTHER.state" ]' "another session's host checkpoint removed"
+gc_check '[ ! -e "/tmp/netplay-guest-$OTHER-999999" ]' "a gone guest's save directory removed, contents too"
+gc_check '[ ! -e "/tmp/netplay-guest-${OTHER}999998" ]' "an old-style guest directory of a gone process removed"
+gc_check '[ -d "/tmp/netplay-guest-$OTHER-$$" ]' "a live process's guest directory kept"
+gc_check '[ -s "/tmp/netplay-host-$SID40.state" ]' "this session's confirmed checkpoint written and kept"
+gc_check '! ls -d /tmp/netplay-guest-"$SID40"-* >/dev/null 2>&1' "the guest removed its own save directory on exit"
+rm -rf "/tmp/netplay-guest-$OTHER-$$" "/tmp/netplay-host-$SID40.state"
+
+echo
 if [ "$fail" -eq 0 ]; then
 	echo "PASS"
 else

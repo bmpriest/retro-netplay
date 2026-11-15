@@ -7,6 +7,7 @@
 #ifndef NETSETUP_H
 #define NETSETUP_H
 
+#include <sys/time.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -42,6 +43,7 @@ typedef struct {
 	bool    hotspot;                /* host will move to its own network */
 	bool    scanned;                /* found by SSID scan, not by announcement */
 	bool    cable;                  /* announcement arrived from the USB peer */
+	struct timeval seen;            /* last announcement (NS_discoverTick expires it) */
 	char    ssid[NS_SSID_LEN];
 	char    psk[NS_PSK_LEN];
 } NS_Peer;

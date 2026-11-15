@@ -27,6 +27,10 @@
 #define DISCOVERY_PORT  55438
 #define DISCOVERY_MAGIC 0x4E504C4BU /* 'NPLK' - same family as the link */
 #define ANNOUNCE_MS     500
+/* A host that has missed a dozen announcements has gone: it ended the session,
+ * moved network or powered off. Long enough for broadcasts a power-saving radio
+ * delays, short enough that the Join list does not offer it for long. */
+#define PEER_EXPIRE_MS  6000
 
 typedef struct __attribute__((packed)) {
 	uint32_t magic;
@@ -3663,6 +3667,7 @@ int NS_discoverTick(NS_Peer* peers, int max) {
 		for (int i = 0; i < count; i++)
 			if (!strcmp(peers[i].ip, ip)) { known = i; break; }
 		/* A version 2 packet completes the entry its version 1 twin made. */
+		if (known >= 0) gettimeofday(&peers[known].seen, NULL);
 		if (known >= 0 && v2) {
 			if (cable) {
 				peers[known].cable = true;
@@ -3701,8 +3706,20 @@ int NS_discoverTick(NS_Peer* peers, int max) {
 		}
 		snprintf(peers[count].ssid, NS_SSID_LEN, "%s", a.ssid);
 		snprintf(peers[count].psk,  NS_PSK_LEN,  "%s", a.psk);
+		gettimeofday(&peers[count].seen, NULL);
 		count++;
 	}
+	/* Drop hosts that have stopped announcing, keeping the rest in order. */
+	int kept = 0;
+	for (int i = 0; i < count; i++) {
+		if (ms_since(&peers[i].seen) > PEER_EXPIRE_MS) {
+			ns_log("discovery: %s stopped announcing; dropped\n", peers[i].ip);
+			continue;
+		}
+		if (kept != i) peers[kept] = peers[i];
+		kept++;
+	}
+	count = kept;
 	return count;
 }
 
