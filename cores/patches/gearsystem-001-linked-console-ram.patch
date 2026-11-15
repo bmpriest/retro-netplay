@@ -1,0 +1,17 @@
+diff --git a/platforms/libretro/libretro.cpp b/platforms/libretro/libretro.cpp
+index fbf37a4e..1001d3b3 100644
+--- a/platforms/libretro/libretro.cpp
++++ b/platforms/libretro/libretro.cpp
+@@ -656,8 +656,11 @@ static GearsystemCore* memory_instance(unsigned id)
+     if (id < 0x100)
+         return instances[0].core;
+ 
++    /* Netplay: the second linked console's work RAM as well as its cartridge
++     * RAM, so a lockstep session can check both consoles. */
+     unsigned index = (id >> 8) - 1;
+-    if (index >= instance_count || (id & 0xFF) != RETRO_MEMORY_SAVE_RAM)
++    if (index >= instance_count ||
++        ((id & 0xFF) != RETRO_MEMORY_SAVE_RAM && (id & 0xFF) != RETRO_MEMORY_SYSTEM_RAM))
+         return NULL;
+     return instances[index].core;
+ }

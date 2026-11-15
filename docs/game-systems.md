@@ -74,7 +74,7 @@ Thirty paks. Seven use a core the shim drives; the rest launch stock.
 | 32X | picodrive | yes | no | **netplay** - untested |
 | FBN | fbneo | yes (arcade, 2+) | no | Stock only; Netplay does not wrap it |
 | FDS | fceumm | yes | no | **netplay** - untested |
-| GG | picodrive | no | hardware only - Gear-to-Gear stubbed | **netplay** - poor fit, see below |
+| GG | picodrive | no | **yes** in Netplay's Gearsystem (64-bit devices); stubbed in picodrive and Genesis Plus GX | **link** - Gear-to-Gear, see below |
 | SEGACD | picodrive | yes | no | **netplay** - untested |
 | SG1000 | picodrive | yes | no | **netplay** - untested |
 | SMS | picodrive | yes | no | **netplay** - untested |
@@ -261,7 +261,8 @@ system, the same on both devices, whatever firmware each runs.
 | FC, FDS | FCEUmm |
 | SFC | Supafaust, then Snes9x |
 | MD, SEGACD, 32X | PicoDrive |
-| MS, GG | Genesis Plus GX (3; 64-bit pairs only), Gearsystem, PicoDrive |
+| GG | Gearsystem link (Netplay's build, 64-bit devices), Genesis Plus GX (3; 64-bit pairs only), Gearsystem, PicoDrive |
+| MS | Genesis Plus GX (3; 64-bit pairs only), Gearsystem, PicoDrive |
 | GB, GBC | Gambatte Dual, then Gambatte link |
 | GBA | armGBA Together (2), armGBA Separate, mGBA Dual (3), gpSP link |
 | PS | PCSX ReARMed (both devices the same word size) |
@@ -287,24 +288,29 @@ device profile to `testing/engines-test.c` when a device or firmware is added.
 
 ## Notes on the awkward cases
 
-**Game Gear is the clearest "so close" entry.** The hardware had Gear-to-Gear,
-and picodrive's Game Gear I/O area is a plain 8-byte array:
+**Game Gear links through Gearsystem.** Gearsystem 3.9.20 (2026-09) added
+Gear-to-Gear to its libretro core in the same shape as the paired Gambatte:
+two Game Gears and the cable between them inside one core, pad 1 playing
+console 1 and pad 2 console 2, one state holding both. Netplay ships its own
+3.9.25 build (`gearsystem_link_libretro.so`, `make cores-gearsystem`, one
+AArch64 binary for every 64-bit device) and runs it as an ordinary
+shared-screen lockstep session - both devices run both consoles - in which the
+shim switches the link on and has each device show and hear its own console:
+the host console 1, the guest console 2. A patch
+(`cores/patches/gearsystem-001-linked-console-ram.patch`) exposes console 2's
+work RAM so the periodic state check covers both consoles. Engine
+`gearsystem-link` heads the GG ladder; a pair without it (a 32-bit device)
+falls back to shared screen, where the link port is empty. Device-tested on
+two spruce devices (Brick and RG35XXH) with OutRun's VERSUS HUMAN
+(`testing/devbridge/gg-outrun.test`).
 
-```c
-unsigned char io_gg[0x08];                 /* pico/pico_int.h:383 */
-```
-
-Six references in the whole tree. Port `0x00` (start/region) and `0x06` (PSG
-stereo) do real work; ports `0x01`-`0x05` - parallel data, direction, TX, RX,
-serial control - are pure storage, written and read back with nothing between
-them. `case 5: d = Pico.ms.io_gg[5] & 0xf8` masks off the low three status bits,
-so a game polling "has a byte arrived?" is told no, permanently.
-
-That is a deliberate quiet stub rather than an oversight, and it means GG link
-is blocked in the core, not in the transport. Shared screen is a poor substitute
-for the games you would want it for - Sonic 2 versus, Columns head to head - as
-those give each player their own view, which one shared instance cannot show.
-The same masking covers SMS.
+picodrive and Genesis Plus GX cannot do this. picodrive's Game Gear I/O area is
+a plain 8-byte array (`io_gg[0x08]`, pico/pico_int.h): ports `0x01`-`0x05` -
+parallel data, direction, TX, RX, serial control - are storage, written and
+read back with nothing between them, and `case 5: d = Pico.ms.io_gg[5] & 0xf8`
+masks off the status bits, so a game polling "has a byte arrived?" is told no,
+permanently. Genesis Plus GX's `io_gg_read` is the same stub. Under either, a
+Game Gear game sees one console with nothing on the cable.
 
 **GBA is narrower than "link cable" suggests.** gpSP does not emulate the GBA
 link cable (the serial multi-play port used by most multiplayer GBA games). What

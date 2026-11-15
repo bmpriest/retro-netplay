@@ -1,4 +1,4 @@
-.PHONY: corecmp cores-dsp-spruce app-spruce dist-spruce udhcpd check-udhcpd cores-dsp check-dsp cores-nds check-nds drastic-radio dist dist-base dist-compatibility dist-full shim cores core-sources compatibility compatibility-sources compatibility-armv7 compatibility-aarch64 compatibility-spruce32 compatibility-spruce32-sources check-compatibility check-netplay-cores cores-gambatte cores-gambatte-dual cores-gpsp cores-mgba cores-mgba-dual mgba-pak gblc-pak app test test-gambatte-dual clean help nds-pak nds-wifi-hooks nds-wifi-paks nds-wifi-a30-pak varnish check-varnish
+.PHONY: corecmp cores-gearsystem cores-dsp-spruce app-spruce dist-spruce udhcpd check-udhcpd cores-dsp check-dsp cores-nds check-nds drastic-radio dist dist-base dist-compatibility dist-full shim cores core-sources compatibility compatibility-sources compatibility-armv7 compatibility-aarch64 compatibility-spruce32 compatibility-spruce32-sources check-compatibility check-netplay-cores cores-gambatte cores-gambatte-dual cores-gpsp cores-mgba cores-mgba-dual mgba-pak gblc-pak app test test-gambatte-dual clean help nds-pak nds-wifi-hooks nds-wifi-paks nds-wifi-a30-pak varnish check-varnish
 .PHONY: dist-complete
 
 PAK        := Netplay.pak
@@ -33,6 +33,7 @@ help:
 	@echo "make shim    cross-build the shim for $(PLATFORMS) (needs docker)"
 	@echo "make cores   build the patched gambatte + gpsp cores (needs docker)"
 	@echo "make cores-gambatte-dual  build the experimental in-process dual Gambatte core"
+	@echo "make cores-gearsystem     build Gearsystem 3.9.25 for Game Gear link (Gear-to-Gear) sessions"
 	@echo "make gblc-pak  build a standalone my282 GBLC emulator test pak"
 	@echo "make nds-pak   build a standalone DraStic NDS pak for my282 (Miyoo A30)"
 	@echo "make nds-wifi-paks  build trace-hook NDS paks for A30 and TrimUI Brick"
@@ -197,6 +198,31 @@ $(GPSP_STAMP): $(GPSP_PATCHES)
 	@patch -d "$(GPSP_SRC)" -p1 < cores/patches/gpsp-003-netplay-version.patch
 	@touch "$@"
 
+GEARSYSTEM_SRC   := $(CORE_SRC_ROOT)/gearsystem
+GEARSYSTEM_REPO  := https://github.com/drhelius/Gearsystem.git
+GEARSYSTEM_REV   := 9421f004
+GEARSYSTEM_PATCH := cores/patches/gearsystem-001-linked-console-ram.patch
+GEARSYSTEM_STAMP := $(GEARSYSTEM_SRC)/.netplay-patched-$(GEARSYSTEM_REV)
+
+# Gearsystem 3.9.25: Gear-to-Gear inside one core (two consoles and the cable).
+$(GEARSYSTEM_STAMP): $(GEARSYSTEM_PATCH)
+	@rm -rf "$(GEARSYSTEM_SRC)"
+	@mkdir -p "$(CORE_SRC_ROOT)"
+	@git clone -q "$(GEARSYSTEM_REPO)" "$(GEARSYSTEM_SRC)"
+	@git -C "$(GEARSYSTEM_SRC)" checkout -q "$(GEARSYSTEM_REV)"
+	@patch -d "$(GEARSYSTEM_SRC)" -p1 < $(GEARSYSTEM_PATCH)
+	@touch "$@"
+
+# The Game Gear link engine (gearsystem-link): a Netplay implementation core
+# like the paired Gambatte, one AArch64 build for every 64-bit platform.
+GEARSYSTEM_LINK_CORE := dist/cores-experimental/aarch64/gearsystem_link_libretro.so
+cores-gearsystem: $(GEARSYSTEM_STAMP)
+	@echo "== gearsystem-link aarch64"
+	@$(MAKE) -s -C "$(BUILDER)" build PLATFORM=tg5040 PROJECT="$$PWD" \
+		CMD="sh cores/build-gearsystem.sh $(GEARSYSTEM_SRC) $(GEARSYSTEM_LINK_CORE)"
+	@printf "   %s  link=%s\n" "$$(strings -n 6 $(GEARSYSTEM_LINK_CORE) | grep -m1 -E '^3\.9\.[0-9]+')" \
+		"$$(strings $(GEARSYSTEM_LINK_CORE) | grep -c gearsystem_link_enable)"
+
 $(MGBA_STAMP): $(MGBA_PATCHES) $(MGBA_DUAL_FRONTEND) shim/include/gambatte_dual.h
 	@rm -rf "$(MGBA_SRC)"
 	@mkdir -p "$(CORE_SRC_ROOT)"
@@ -226,7 +252,7 @@ define core_build
 		done
 endef
 
-cores: core-sources cores-gambatte cores-gambatte-dual cores-gpsp
+cores: core-sources cores-gambatte cores-gambatte-dual cores-gpsp cores-gearsystem
 
 cores-gambatte:
 	@test -d "$(GAMBATTE_SRC)" || { echo "missing $(GAMBATTE_SRC)"; exit 1; }
@@ -676,6 +702,7 @@ dist-spruce: $(foreach p,$(SPRUCE_PLATFORMS),check-shim-$(if $(filter my285,$(p)
 		cp "$(DRASTIC_RADIO)" "$$D/bin/$$p/libdrastic_wifi.so" && \
 		cp dist/cores/$$p/gambatte_libretro.so dist/cores/$$p/gpsp_libretro.so \
 		   dist/cores-experimental/$$p/gambatte_dual_libretro.so "$$D/cores/override/$$p/" || exit 1; \
+		case $$p in my282) ;; *) cp $(GEARSYSTEM_LINK_CORE) "$$D/cores/override/$$p/" || exit 1 ;; esac; \
 		case " $(MGBA_PLATFORMS) " in *" $$p "*) \
 			cp dist/cores-experimental/$$p/mgba_dual_libretro.so "$$D/cores/override/$$p/" || exit 1 ;; \
 		esac; \
@@ -793,6 +820,8 @@ dist-base: $(BASE_DIST_CHECKS)
 		   "$(BASE_STAGE)/$(PAK)/cores/override/$$p/"; \
 		cp dist/cores-experimental/$$p/gambatte_dual_libretro.so \
 		   "$(BASE_STAGE)/$(PAK)/cores/override/$$p/"; \
+		case $$p in my282|my285) ;; *) cp $(GEARSYSTEM_LINK_CORE) \
+		   "$(BASE_STAGE)/$(PAK)/cores/override/$$p/" ;; esac; \
 	done
 	@for p in $(MGBA_PLATFORMS); do \
 		mkdir -p "$(BASE_STAGE)/$(PAK)/cores/mgba/$$p/MGBA.pak" \
@@ -857,6 +886,8 @@ check-netplay-cores:
 	test -f dist/cores-experimental/$$p/gambatte_dual_libretro.so || { \
 		echo "missing netplay core $$p/gambatte_dual - run 'make cores' first"; exit 1; }; \
 	done
+	@test -f $(GEARSYSTEM_LINK_CORE) || { \
+		echo "missing $(GEARSYSTEM_LINK_CORE) - run 'make cores-gearsystem' first"; exit 1; }
 	@for p in $(MGBA_PLATFORMS); do \
 		test -f dist/cores/$$p/mgba_libretro.so || { echo "missing mGBA core $$p"; exit 1; }; \
 		test -f dist/cores-experimental/$$p/mgba_dual_libretro.so || { echo "missing mGBA dual core $$p"; exit 1; }; \

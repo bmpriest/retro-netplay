@@ -7,6 +7,7 @@ the netplay logs afterwards say the devices did not play together.
 | Test | Mode | What it plays |
 | --- | --- | --- |
 | `sor2.test` | shared screen (PicoDrive) | Streets of Rage 2: 2 PLAYERS, each device picks its own fighter, 90 s of brawling |
+| `gg-outrun.test` | Gear-to-Gear link (Gearsystem link core) | OutRun: VERSUS HUMAN, host red and guest blue on their own consoles, 90 s of racing |
 | `rcr.test` | shared screen (FCEUmm) | River City Ransom: 2P PLAY, 90 s of brawling from both |
 | `contra3.test` | shared screen (Snes9x) | Contra III: 2 PLAYERS A, 90 s of running and shooting |
 | `sf2.test` | shared screen (Snes9x / Supafaust) | Street Fighter II: VS BATTLE, Honda vs Ken, 90 s of fighting; screenshots only, no references yet |

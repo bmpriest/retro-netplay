@@ -1570,6 +1570,11 @@ static int engine_device_tier(void) {
 static bool engine_local_core(const NS_Engine* e, char* out, int len, bool* installable) {
 	char p[512];
 	if (installable) *installable = false;
+	/* The Game Gear link core is Netplay's own build on every firmware. */
+	if (!strcmp(e->name, "gearsystem-link")) {
+		snprintf(out, len, "%s/cores/override/%s/gearsystem_link_libretro.so", ns_pak, shared_platform());
+		return file_exists(out);
+	}
 	bool dual_ok = true;
 	if (!strcmp(e->name, "gambatte-dual") || !strcmp(e->name, "mgba-dual")) {
 		snprintf(p, sizeof(p), "%s/cores/override/%s/%s_dual_libretro.so",

@@ -1,0 +1,71 @@
+# OutRun (Game Gear) - Gear-to-Gear VERSUS HUMAN (Gearsystem link), two players.
+#
+# The gearsystem-link engine runs both Game Gears and the cable between them
+# in one core, in lockstep on both devices; the host shows console 1 and the
+# guest console 2. So VERSUS HUMAN, greyed out on a lone Game Gear, lights up
+# on both title screens, and the race that follows shows each player their
+# own car.
+#
+# OutRun's link protocol, as found on the devices and replayed frame by frame
+# on a PC (the core alone, no Netplay): one console choosing VERSUS HUMAN
+# takes both to the music select; the first to confirm a tune waits ("WAIT")
+# and drives the red car, and the other's confirm starts the race. The title
+# gives up after about 14 s without a press: each console drops back to the
+# SEGA logo on its own, and a VERSUS HUMAN chosen around then leaves one
+# console in COURSE SELECT (VERSUS COMPUTER) and the other restarting. A
+# confirm pressed at a waiting console breaks the handshake (CHECK CARTRIDGE
+# on both). So: only the host picks VERSUS HUMAN, promptly once the titles
+# are up, and the confirms go one at a time.
+#
+# Title (VS HUMAN lit) -> host picks VERSUS HUMAN -> music select on both ->
+# host confirms and waits (a screen only a linked game has) -> guest confirms
+# -> the grid, host red, guest blue -> 90 seconds of racing from both -> both
+# logs must show agreement. Their state checks hash both consoles' RAM.
+# Run with run.sh.
+
+all:WAIT_FOR devbridge 30000
+host:OPEN_GAME GG "Sega Game Gear (GG)/OutRun (Europe, Brazil).zip"
+WAIT 3000
+guest:OPEN_GAME GG "Sega Game Gear (GG)/OutRun (Europe, Brazil).zip"
+all:WAIT_FOR game 30000
+
+# The titles, with VERSUS HUMAN lit: it is only while the other Game Gear
+# answers on the cable. The check reads that one line of text (lit or grey).
+host:VERIFY_WAIT {host_refs}/gg-outrun-vs-human.png 30000 threshold=3 region=0.21,0.82,0.7,0.075
+guest:VERIFY_WAIT {guest_refs}/gg-outrun-vs-human.png 30000 threshold=3 region=0.21,0.82,0.7,0.075
+
+# Both cursors down to it at once, then the host picks it - all inside the
+# title's 14 s. The cursor check reads that row with the cursor beside it:
+# whole screens score 0.2 with the cursor two rows up.
+host:TRM sh {helpers}/keys.sh --bg down:0.3:0.5 down:0.3:0
+guest:TRM sh {helpers}/keys.sh --bg down:0.3:0.5 down:0.3:0
+WAIT 2000
+host:VERIFY {host_refs}/gg-outrun-vs-human.png threshold=1.5 region=0.11,0.82,0.8,0.075
+guest:VERIFY {guest_refs}/gg-outrun-vs-human.png threshold=1.5 region=0.11,0.82,0.8,0.075
+host:TRM sh {helpers}/keys.sh start:0.3:0
+
+# The music select on both. Its menu half tells it from the title (18),
+# course select (24) and WAIT (20); whole screens differ by only 9.5-11.
+host:VERIFY_WAIT {host_refs}/gg-outrun-music.png 20000 threshold=6 region=0,0.45,1,0.55
+guest:VERIFY_WAIT {guest_refs}/gg-outrun-music.png 20000 threshold=6 region=0,0.45,1,0.55
+
+# The host confirms first and its console waits for the other one. The music
+# select ignores presses for a moment after it appears, so the press repeats
+# until WAIT shows - checked before each, 4 s apart, since a confirm landing
+# on WAIT would break the handshake.
+host:VERIFY_UNTIL {host_refs}/gg-outrun-wait.png 24000 every=4000 threshold=6 region=0,0.45,1,0.55 :: sh {helpers}/keys.sh start:0.3:0
+guest:TRM sh {helpers}/keys.sh start:0.3:1
+# The starting grid, each device behind its own car.
+host:VERIFY_WAIT {host_refs}/gg-outrun-grid.png 20000
+guest:VERIFY_WAIT {guest_refs}/gg-outrun-grid.png 20000
+
+host:TRM sh {helpers}/gameplay.sh --bg 90 a a a left+a right+a a left+a right+a b
+guest:TRM sh {helpers}/gameplay.sh --bg 90 a a a left+a right+a a left+a right+a b
+WAIT 93000
+all:SCREEN gg-outrun-after-play
+
+host:TRM sh {helpers}/check.sh shared OutRun 50
+guest:TRM sh {helpers}/check.sh shared OutRun 50
+
+all:TRM sh {helpers}/quit.sh minarch
+all:WAIT_FOR devbridge 30000

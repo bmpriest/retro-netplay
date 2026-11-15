@@ -1059,6 +1059,31 @@ static void armgba_together_local_view(void) {
 	         "changes and controller switching are off\n", screen);
 }
 
+static int core_is_gearsystem(void) {
+	struct retro_system_info info;
+	memset(&info, 0, sizeof(info));
+	core.get_system_info(&info);
+	return info.library_name && contains_ci(info.library_name, "gearsystem");
+}
+
+/* Gear-to-Gear. Gearsystem 3.9.20+ runs two Game Gears and the cable between
+ * them inside one core: pad 1 plays console 1, pad 2 console 2, and one state
+ * holds both. So a shared-screen session already carries a real link game -
+ * both devices run both consoles in lockstep - and all that differs per
+ * device is which console it shows and hears: the host console 1, the guest
+ * console 2. The link switch itself is the same on both (the core only links
+ * native Game Gear games; a Master System game runs as one console). Older
+ * Gearsystems have none of these options and never ask. */
+static void gearsystem_link_local_view(void) {
+	const char* screen = NetLink_getRole() == NETLINK_ROLE_CLIENT ? "Screen 2" : "Screen 1";
+	set_option_override("gearsystem_link_enable", "Enabled");
+	set_option_override("gearsystem_link_screen", screen);
+	set_option_override("gearsystem_link_audio", screen);
+	set_option_override("gearsystem_link_switch", "Disabled");
+	shim_log("Gearsystem Gear-to-Gear: both consoles run here; this device shows and hears %s\n",
+	         screen);
+}
+
 /*
  * What to answer mGBA when it asks the frontend for a target audio rate.
  *
@@ -1481,6 +1506,7 @@ static void ensure_loaded(void) {
 		} else {
 			force_builtin_firmware();
 			if (armgba_session && netplay_mode) armgba_together_local_view();
+			if (netplay_mode && core_is_gearsystem()) gearsystem_link_local_view();
 		}
 
 		struct retro_system_info info;
@@ -3340,7 +3366,11 @@ static bool check_by_memory(void) {
 }
 
 static uint32_t memory_check_hash(void) {
-	static const unsigned ids[] = { RETRO_MEMORY_SYSTEM_RAM, RETRO_MEMORY_SAVE_RAM };
+	/* 0x200 | id: the second console of a linked pair (Gearsystem's
+	 * Gear-to-Gear; Netplay's build exposes its work RAM too). Cores with one
+	 * console report size 0 there, the same on both devices. */
+	static const unsigned ids[] = { RETRO_MEMORY_SYSTEM_RAM, RETRO_MEMORY_SAVE_RAM,
+	                                0x200 | RETRO_MEMORY_SYSTEM_RAM, 0x200 | RETRO_MEMORY_SAVE_RAM };
 	uint32_t h = 2166136261u;
 	for (size_t r = 0; r < sizeof(ids) / sizeof(ids[0]); r++) {
 		size_t n = core.get_memory_size(ids[r]);
