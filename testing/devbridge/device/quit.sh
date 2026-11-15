@@ -68,6 +68,13 @@ else
 	sh "$HERE/keys.sh" $keys
 fi
 gone_within 25 && { echo "quit: menu"; exit 0; }
+# NextUI on H700: a SIGTERMed minarch, DevBridge relaunching, and the device
+# powered itself off three seconds later (2026-11-15, RG35XXH). Until that is
+# understood, leave the emulator running and say so; a person decides.
+if [ "$proc" = minarch.elf ] && [ -d /mnt/SDCARD/.system/h700 ]; then
+	echo "quit: $proc still running 25 s after its menu's quit; not killing it on NextUI H700" >&2
+	exit 1
+fi
 echo "quit: $proc still running 25 s after its menu's quit; SIGTERM" >&2
 stop
 gone_within 15 && { echo "quit: term"; exit 0; }
