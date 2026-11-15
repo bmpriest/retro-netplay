@@ -59,9 +59,12 @@ the Brick that becomes the host must not cost rebind attempts.
 
 The app does not yet offer Host > USB cable.
 
-## H700 (experimental, spruce): USB host only
+## H700 (experimental, spruce and NextUI): USB host only
 
-`bin/spruce/h700/netplay-cable.elf` is the same daemon. Probed on an RG35XXH
+`bin/spruce/h700/netplay-cable.elf` and `bin/h700/netplay-cable.elf` are the same
+daemon. Both firmwares run on BaseOS there, so the USB facts below hold for each.
+The app offers the cable on H700 only when the host-only controller
+(`5200000.ehci1-controller`) exists. Probed on an RG35XXH
 (spruce 4.6.1, BaseOS kernel 4.9.170) on 2026-11-14:
 
 | RG35XXH port | Controller | Roles |

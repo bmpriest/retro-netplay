@@ -303,12 +303,17 @@ const char* NS_cablePortHint(void) {
 }
 
 bool NS_canCable(void) {
-	if (strcmp(ns_platform, "tg5040") && strcmp(ns_platform, "h700")) return false;
 	char exe[600];
 	cable_executable(exe, sizeof(exe));
-	return access(exe, X_OK) == 0 && access("/dev/net/tun", R_OK | W_OK) == 0 &&
-	       dir_exists("/sys/kernel/config/usb_gadget/g1/functions/ffs.adb") &&
-	       dir_exists("/sys/class/udc/5100000.udc-controller");
+	if (access(exe, X_OK) != 0 || access("/dev/net/tun", R_OK | W_OK) != 0) return false;
+	if (!strcmp(ns_platform, "tg5040"))
+		return dir_exists("/sys/kernel/config/usb_gadget/g1/functions/ffs.adb") &&
+		       dir_exists("/sys/class/udc/5100000.udc-controller");
+	/* An H700 is only ever the USB host, on the host-only controller the
+	 * daemon knows; a model without it has no cable to offer. */
+	if (!strcmp(ns_platform, "h700"))
+		return dir_exists("/sys/bus/platform/devices/5200000.ehci1-controller");
+	return false;
 }
 
 bool NS_cableRunning(void) { return cable_pid() != 0; }

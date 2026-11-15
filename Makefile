@@ -9,6 +9,8 @@ BASE_STAGE     := dist/stage-base
 COMPAT_STAGE   := dist/stage-compatibility
 FULL_STAGE     := dist/stage-full
 PLATFORMS  := tg5040 tg5050 my282 my355 h700
+# The USB cable daemon: the Brick, and H700 as the USB host only (docs/cable.md).
+CABLE_PLATFORMS := tg5040 h700
 
 # build-platforms owns the image-digest/source-commit pairing for every target.
 # Keep the sibling checkout as the convenient default, but allow CI and other
@@ -753,7 +755,7 @@ test:
 # shipped and is the pak's whole UI.)
 ###########################################################
 
-BASE_DIST_CHECKS := $(foreach p,$(PLATFORMS),check-shim-$(p) check-app-$(p)) check-cable-tg5040 check-netplay-cores check-dsp check-nds check-varnish check-udhcpd
+BASE_DIST_CHECKS := $(foreach p,$(PLATFORMS),check-shim-$(p) check-app-$(p)) $(foreach p,$(filter $(CABLE_PLATFORMS),$(PLATFORMS)),check-cable-$(p)) check-netplay-cores check-dsp check-nds check-varnish check-udhcpd
 
 dist: dist-base dist-compatibility dist-full
 	@echo
@@ -820,7 +822,9 @@ dist-base: $(BASE_DIST_CHECKS)
 		cp bin/$$p/netplay-wifips.elf "$(BASE_STAGE)/$(PAK)/bin/$$p/"; \
 		cp bin/$$p/netplay-quickmenu.elf "$(BASE_STAGE)/$(PAK)/bin/$$p/"; \
 		done
-	@cp bin/tg5040/netplay-cable.elf "$(BASE_STAGE)/$(PAK)/bin/tg5040/"
+	@for p in $(CABLE_PLATFORMS); do \
+		case " $(PLATFORMS) " in *" $$p "*) cp bin/$$p/netplay-cable.elf "$(BASE_STAGE)/$(PAK)/bin/$$p/" ;; esac; \
+	done
 	@for p in $(UDHCPD_PLATFORMS); do \
 		cp bin/$$p/udhcpd "$(BASE_STAGE)/$(PAK)/bin/$$p/"; \
 	done
@@ -900,9 +904,9 @@ check-app-%:
 	@test -f bin/$*/netplay-quickmenu.elf || { \
 		echo "missing bin/$*/netplay-quickmenu.elf - run 'make app' first"; exit 1; }
 
-check-cable-tg5040:
-	@test -f bin/tg5040/netplay-cable.elf || { \
-		echo "missing Brick cable daemon - run 'make app' first"; exit 1; }
+check-cable-%:
+	@test -f bin/$*/netplay-cable.elf || { \
+		echo "missing bin/$*/netplay-cable.elf - run 'make app' first"; exit 1; }
 
 check-spruce-cable-tg5040:
 	@test -f bin/spruce/tg5040/netplay-cable.elf || { \

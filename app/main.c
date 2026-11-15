@@ -1264,8 +1264,11 @@ static void render(SDL_Surface* s) {
 			snprintf(r.label, sizeof(r.label), "%s", join_label(i));
 			y = draw_two_col(s, &r, y, i == sub_sel);
 		}
-		y = draw_line(s, "USB cable: one device's top socket to the other's bottom socket; "
-		              "both players choose USB cable.", y + SCALE1(6), COLOR_GRAY, true);
+		if (can_cable) {
+			char hint[256];
+			snprintf(hint, sizeof(hint), "USB cable: %s Both players choose USB cable.", NS_cablePortHint());
+			y = draw_line(s, hint, y + SCALE1(6), COLOR_GRAY, true);
+		}
 		y = draw_wifi_line(s, y + SCALE1(8));
 		if (status[0]) draw_line(s, status, y, COLOR_GRAY, true);
 		GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "SELECT", NULL}, 1, s, 1);
@@ -1503,8 +1506,7 @@ static void render(SDL_Surface* s) {
 			else if (!strcmp(state, "linked"))
 				y = draw_line(s, "The other player chooses Host > Host over USB cable.", y, COLOR_GRAY, true);
 			else
-				y = draw_line(s, "Use a data cable from one device's top socket to the other's bottom socket.",
-				              y, COLOR_GRAY, true);
+				y = draw_line(s, NS_cablePortHint(), y, COLOR_GRAY, true);
 		} else if (join_total == 0) {
 			y = draw_line(s, "Looking for a host...", y, COLOR_WHITE, false);
 			y += SCALE1(4);
