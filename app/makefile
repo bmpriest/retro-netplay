@@ -106,7 +106,7 @@ ifeq (nextui,$(FIRMWARE))
 	$(CROSS_COMPILE)gcc nextui/quickmenu.c netsetup.c cableproto.c engines.c -o $(QUICKMENU_PRODUCT) $(CFLAGS) $(BROKER_LDFLAGS)
 	@echo "built $(QUICKMENU_PRODUCT)"
 endif
-ifeq (tg5040,$(PLATFORM))
+ifneq (,$(filter $(PLATFORM),tg5040 h700))
 	$(CROSS_COMPILE)gcc usbnet.c cableproto.c brick-power.c netsetup.c \
 		-o $(CABLE_PRODUCT) $(CFLAGS) $(BROKER_LDFLAGS) -lpthread
 	@echo "built $(CABLE_PRODUCT)"

@@ -1,4 +1,4 @@
-# Brick cable bridge development status
+# Cable bridge development status (Brick; H700 as host)
 
 `bin/tg5040/netplay-cable.elf` carries IPv4 packets over a USB-C data cable.
 The **top** Brick port is the USB host; the **bottom** port is the gadget. Run
@@ -58,3 +58,29 @@ cannot tell a host from a wall charger, and a charger in the bottom socket of
 the Brick that becomes the host must not cost rebind attempts.
 
 The app does not yet offer Host > USB cable.
+
+## H700 (experimental, spruce): USB host only
+
+`bin/spruce/h700/netplay-cable.elf` is the same daemon. Probed on an RG35XXH
+(spruce 4.6.1, BaseOS kernel 4.9.170) on 2026-11-14:
+
+| RG35XXH port | Controller | Roles |
+|---|---|---|
+| "OTG"-labelled | `5200000.ehci1`/`ohci1` | host only: the Brick top socket's controller, by name |
+| main (charge) | USB0: `5101000.ehci0`/`ohci0` plus the only UDC, `5100000.udc-controller` | device or host; the sunxi manager switches it on plug (`otg_role` `null` -> `usb_host`/`usb_device`) |
+
+BaseOS composes `g1` (`ffs.adb`) once at boot and leaves its `UDC` empty
+after any replug; its `usb-gadget-adb` says so.
+
+**An H700 is never the USB gadget.** As gadget (Brick top -> RG35XXH main) one
+session worked (FC/SFC/MD passed at delay 1), but the second arm froze the
+device, the SD card came back dirty and read-only, and every write since the
+first gadget session was lost (fsck put them in `FOUND.000`). The fork's RG34XX
+on the same kernel froze the same way, with slab faults captured. As USB host
+(RG35XXH OTG port -> Brick bottom) it ran 20 arm/stop cycles with no kernel
+error, and FC/SFC/MD passed.
+
+So on `PLATFORM=h700`, `--role auto` goes straight to the host role on the OTG
+port, and `--role gadget` refuses. The app's cable hint (`cable_hint` in
+`--ctl status`, the spruce menu, and the Join error) names the OTG port, and
+says to turn the cable round when the main port has power on it.

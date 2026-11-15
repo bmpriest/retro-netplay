@@ -1412,6 +1412,18 @@ static bool cp_auto;
 static bool cp_auto_to_host;
 static bool cp_host_scan(char* node_out, size_t cap, unsigned* bus_out);
 
+/* H700 (BaseOS, kernel 4.9.170) must never be the gadget. A session there
+ * works, but setting the cable function up and taking it down again crashes
+ * the kernel within a couple of sessions: an RG34XX (the fork, three captured
+ * slab faults) and an RG35XXH (2026-11-14, froze on the second arm, the SD
+ * card left dirty and remounted read-only, writes since the first gadget
+ * session lost). As USB host the same RG35XXH ran 20 sessions clean. So on
+ * H700 auto is host-only, and the user is told to turn the cable round. */
+static bool cp_gadget_unsafe(void) {
+	const char* platform = getenv("PLATFORM");
+	return platform && !strcmp(platform, "h700");
+}
+
 static bool cp_gadget_start(char* err, int errlen) {
 	char udc_path[CP_LINE_MAX], function_path[CP_LINE_MAX], link_path[CP_LINE_MAX];
 	char udc[CP_NAME_MAX];
@@ -2229,6 +2241,20 @@ int main(int argc, char** argv) {
 		cp_fail("the charger setting needs repair before another cable run");
 		remove(cp_pid_path);
 		return 1;
+	}
+
+	if (role == CP_ROLE_GADGET && cp_gadget_unsafe()) {
+		if (cp_auto) {
+			cp_log("auto: this device is never the USB gadget; waiting on its host-only port\n");
+			role = CP_ROLE_HOST;
+			cp_status_init(&cp_status, role);
+			cp_publish();
+		} else {
+			cp_fail("this device cannot be the USB gadget: put the cable in its OTG port "
+			        "and the other end in the other device's bottom socket");
+			remove(cp_pid_path);
+			return 1;
+		}
 	}
 
 	if (role == CP_ROLE_GADGET) {

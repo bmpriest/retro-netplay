@@ -16,7 +16,7 @@
 #include "netsetup.h"
 
 /* What the last action did: the app's status line, --ctl's answer. */
-extern char   status[128];
+extern char   status[256];
 /* Appended to the armed line: whether compatibility cores were selected. */
 extern char   core_note[64];
 extern NS_Check checks[8];

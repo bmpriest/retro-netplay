@@ -13,7 +13,7 @@
 
 #include "control.h"
 
-char   status[128] = "";
+char   status[256] = "";
 /* Appended to the armed line: whether local compatibility cores were selected
  * is exactly the kind of thing that is otherwise invisible until a desync. */
 char   core_note[64] = "";
@@ -462,6 +462,7 @@ static void ctl_print_status(void) {
 	printf("ip=%s\n", ip);
 	printf("can_host_adhoc=%d\n", NS_canHostAdhoc() ? 1 : 0);
 	printf("can_cable=%d\n", NS_canCable() ? 1 : 0);
+	if (NS_canCable()) printf("cable_hint=%s\n", NS_cablePortHint());
 	char cable_detail[96];
 	printf("cable=%s\n", NS_cableState(cable_detail, sizeof(cable_detail)));
 	if (cable_detail[0]) printf("cable_error=%s\n", cable_detail);
@@ -739,10 +740,12 @@ int NC_ctlMain(int argc, char* argv[]) {
 			if (!got) {
 				char detail[96];
 				const char* state = NS_cableState(detail, sizeof(detail));
-				snprintf(status, sizeof(status), "%s",
-				         !strcmp(state, "linked") ? "cable linked, but no host is armed on the other device"
-				         : !strcmp(state, "failed") ? "the cable link failed; see cable.log"
-				         : "no device on the cable - check it joins a top socket to a bottom one");
+				if (!strcmp(state, "linked"))
+					snprintf(status, sizeof(status), "cable linked, but no host is armed on the other device");
+				else if (!strcmp(state, "failed"))
+					snprintf(status, sizeof(status), "the cable link failed; see cable.log");
+				else
+					snprintf(status, sizeof(status), "no device on the cable. %s", NS_cablePortHint());
 				NS_cableStop();
 				return ctl_result(false);
 			}

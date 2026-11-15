@@ -84,3 +84,22 @@ test ! -e "$gadget/configs/c.1/ffs.cable"
 test ! -e "$state/usb_restore"
 test "$(cat "$gadget/UDC")" = '5100000.udc-controller'
 echo 'Brick cable repair: ok'
+
+# H700 is never the gadget (usbnet.c, cp_gadget_unsafe): --role gadget refuses
+# and --role auto goes to the host role, and neither touches g1.
+rm -rf "$gadget/functions/ffs.cable" "$state/cable.log" "$state/cable.status"
+h700() { PLATFORM=h700 SDCARD_PATH="$root/card" NP_CABLE_CONFIGFS="$root/config" \
+    NP_CABLE_FFS_DIR="$root/ffs" NP_CABLE_UDC_DIR="$root/udc" NP_CABLE_VBUS="$root/vbus" \
+    NP_CABLE_TUN="$root/no-tun" "$root/netplay-cable.elf" "$@"; }
+if h700 --role gadget; then
+	echo 'H700 accepted --role gadget' >&2
+	exit 1
+fi
+grep -q 'state=failed' "$state/cable.status"
+grep -q 'cannot be the USB gadget' "$state/cable.status"
+test ! -e "$gadget/functions/ffs.cable"
+h700 --role auto || true
+grep -q 'never the USB gadget' "$state/cable.log"
+test ! -e "$gadget/functions/ffs.cable"
+test "$(cat "$gadget/UDC")" = '5100000.udc-controller'
+echo 'H700 never the gadget: ok'

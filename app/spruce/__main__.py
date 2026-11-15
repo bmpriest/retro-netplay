@@ -449,18 +449,24 @@ def host() -> None:
     choices.append(("wifi", "Host over WiFi", "Use the current network", ""))
     if status.get("can_cable") == "1":
         choices.append(("cable", "Host over USB cable",
-                        "Top socket to the other device's bottom socket", ""))
+                        cable_hint(status), ""))
     choice = menu("Host", choices)
     if choice:
         attempt("Hosting", "Checking and starting session", "host", choice[0])
 
 
+def cable_hint(status: dict) -> str:
+    """Which sockets the cable joins on this device, as the app says it."""
+    return status.get("cable_hint") or "Join one device's top socket to the other's bottom socket."
+
+
 def join() -> None:
-    if fields(control("status")).get("can_cable") == "1":
+    status = fields(control("status"))
+    if status.get("can_cable") == "1":
         choice = menu("Join", [
             ("find", "Find hosts", "WiFi and ad hoc", ""),
             ("cable", "Join over USB cable",
-             "Top socket to the other device's bottom socket; both players choose USB cable", ""),
+             cable_hint(status) + " Both players choose USB cable.", ""),
         ])
         if choice is None:
             return

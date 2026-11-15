@@ -682,6 +682,7 @@ dist-spruce: $(foreach p,$(SPRUCE_PLATFORMS),check-shim-$(if $(filter my285,$(p)
 		esac; \
 	done && \
 	cp bin/spruce/tg5040/netplay-cable.elf "$$D/bin/tg5040/" && \
+	cp bin/spruce/h700/netplay-cable.elf "$$D/bin/h700/" && \
 	if [ -d dist/compatibility/aarch64 ]; then \
 		mkdir -p "$$D/cores/compatibility" && \
 		cp -R dist/compatibility/aarch64 "$$D/cores/compatibility/" && \
@@ -906,6 +907,8 @@ check-cable-tg5040:
 check-spruce-cable-tg5040:
 	@test -f bin/spruce/tg5040/netplay-cable.elf || { \
 		echo "missing spruce Brick cable daemon - run 'make app-spruce' first"; exit 1; }
+	@test -f bin/spruce/h700/netplay-cable.elf || { \
+		echo "missing spruce H700 cable daemon - run 'make app-spruce' first"; exit 1; }
 
 clean:
 	rm -rf dist

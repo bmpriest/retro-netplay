@@ -281,11 +281,29 @@ static bool dir_exists(const char* p) {
 	return stat(p, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-/* Only the Brick for now: the daemon knows its two sockets (top host-only,
- * bottom the only device port). Other devices are probed per model before they
- * are offered (docs/analysis/usb-cable-plan.md, phase 7). */
+/* The Brick, and (experimental) H700 devices with the same two controllers:
+ * a host-only 5200000.ehci1 and one device port on 5100000 (the RG35XXH, its
+ * "OTG"-labelled port and its main port). Other devices are probed per model
+ * before they are offered (docs/analysis/usb-cable-plan.md, phase 7). */
+/* Which sockets to join, said for this device. On H700 the cable must make it
+ * the USB host (see usbnet.c, cp_gadget_unsafe): its "OTG" port, which is
+ * host-only, to the other device's bottom socket. Its main port has power on it
+ * when the cable is the wrong way round - or a charger is plugged in, so the
+ * hint says "if". */
+const char* NS_cablePortHint(void) {
+	if (strcmp(ns_platform, "h700"))
+		return "Join one device's top socket to the other's bottom socket.";
+	char online[4] = "";
+	FILE* f = fopen("/sys/class/power_supply/axp2202-usb/online", "r");
+	if (f) { if (!fgets(online, sizeof(online), f)) online[0] = '\0'; fclose(f); }
+	if (online[0] == '1')
+		return "This device's main port has power on it. If that is the cable, turn it round: "
+		       "this device's OTG port to the other device's bottom socket.";
+	return "Join this device's OTG port to the other device's bottom socket.";
+}
+
 bool NS_canCable(void) {
-	if (strcmp(ns_platform, "tg5040")) return false;
+	if (strcmp(ns_platform, "tg5040") && strcmp(ns_platform, "h700")) return false;
 	char exe[600];
 	cable_executable(exe, sizeof(exe));
 	return access(exe, X_OK) == 0 && access("/dev/net/tun", R_OK | W_OK) == 0 &&

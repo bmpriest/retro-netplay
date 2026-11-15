@@ -64,6 +64,7 @@ bool NS_cablePeer(char* out, int len);
  * Bricks: whichever finds the other on its top socket becomes the USB host.
  * Both players start it - Host > USB cable and Join > USB cable - and the
  * netplay session then runs over the link like any other network. */
+const char* NS_cablePortHint(void); /* which sockets the cable joins, for this device: a sentence */
 bool NS_canCable(void);           /* this device can run the cable daemon */
 bool NS_cableStart(char* err, int errlen);   /* starts it; true if running */
 void NS_cableStop(void);          /* stops it and repairs USB; safe if not running */
