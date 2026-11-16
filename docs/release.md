@@ -80,7 +80,7 @@ hybrid traffic defaults on and verbose logs default off.
 downloads `{repo_url}/releases/download/{version}/{release_filename}`. So:
 
 1. Build with `make dist-complete` from the commit you will tag.
-2. Tag that commit with `pak.json`'s `version` exactly (`v1.0.0`), publish the
+2. Tag that commit with `pak.json`'s `version` exactly (e.g. `v1.1.0`), publish the
    GitHub release and upload both Complete zips.
 3. Only then push a `pak.json` version bump to the default branch.
 

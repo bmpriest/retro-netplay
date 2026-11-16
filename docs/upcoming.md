@@ -9,7 +9,7 @@ partly done along the way.
 
 ### Core edition and downloads
 
-v1.0.0 ships `NextUI-Netplay-Complete.zip` (also the Pak Store download) and
+Releases ship `NextUI-Netplay-Complete.zip` (also the Pak Store download) and
 `Spruce-Netplay-Complete.zip`, with compatibility cores bundled for offline
 use. NDS.pak is no longer bundled; NextUI users install it from the Pak Store.
 See [release.md](release.md) for the layouts and supported targets.
@@ -35,9 +35,8 @@ on the A30 and Mini family is untested.
 
 ### USB-C cable
 
-A third way to connect, with about 1 ms round trips and no radio involved.
-Plan: [analysis/usb-cable-plan.md](analysis/usb-cable-plan.md). Branch
-`feat/cable`.
+Shipped in v1.1.0 for Bricks, with H700 as the USB host only
+([cable.md](cable.md)). Open: other devices as the gadget end.
 
 ### Onboarding and RetroArch
 

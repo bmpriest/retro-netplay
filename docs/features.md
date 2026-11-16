@@ -65,6 +65,9 @@ uses it whenever both devices can (see [engine-matrix.md](engine-matrix.md)).
   Mario Kart: Super Circuit. 64-bit devices only. On NextUI it needs Netplay's
   MGBA.pak (Configuration > Cores > Extras); without it, GBA falls back to gpSP
   and a game gpSP cannot link names the device that should install mGBA.
+- **Gearsystem**: Game Gear Gear-to-Gear, on every device (Netplay's own
+  3.9.25 build). Each device shows its own Game Gear; OutRun's VERSUS HUMAN
+  races at 60 fps over ad hoc.
 
 Both devices need both games, because no ROM crosses the network. If either
 device lacks one, the game restarts on the ordinary link path.
@@ -87,7 +90,7 @@ access point. Asphalt: Urban GT 2 also races. DS wants ad hoc.
 
 ## Connecting
 
-### Two ways to connect
+### Ways to connect
 
 - **House WiFi**: both devices on the same network.
 - **Ad hoc** (Stable on Brick-class hosts): the host creates its own
@@ -97,7 +100,11 @@ access point. Asphalt: Urban GT 2 also races. DS wants ad hoc.
   Switch** instead leaves it, for a quieter channel. Devices without an
   AP-capable radio cannot host ad hoc (the option is hidden), but can join.
 
-A USB-C cable is planned as a third ([upcoming.md](upcoming.md)).
+- **USB-C cable** (Experimental): **Host over USB cable** / **Join over USB
+  cable** link two Bricks directly, no radio involved; the Bricks pick which
+  end is the USB host from the ports used. An RG35XX H can only be the host
+  end, and its menus say which way round to plug the cable. Cable sessions
+  use at least one frame of input delay. See [cable.md](cable.md).
 
 ### Finding a host
 
