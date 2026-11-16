@@ -33,7 +33,7 @@ A note after `/` is the advice shown when a gpSP game is not linkable.
 | SEGACD | picodrive |
 | 32X | picodrive |
 | MS | gearsystem |
-| GG | gearsystem |
+| GG | gearsystem-link |
 | GB | gambatte-dual |
 | GBC | gambatte-dual |
 | GBA | armgba-together |
@@ -50,7 +50,7 @@ A note after `/` is the advice shown when a gpSP game is not linkable.
 | SEGACD | picodrive |
 | 32X | picodrive |
 | MS | gearsystem |
-| GG | gearsystem |
+| GG | gearsystem-link |
 | GB | gambatte-dual |
 | GBC | gambatte-dual |
 | GBA | armgba-separate |
@@ -101,7 +101,7 @@ A note after `/` is the advice shown when a gpSP game is not linkable.
 | SEGACD | picodrive |
 | 32X | picodrive |
 | MS | picodrive |
-| GG | picodrive |
+| GG | gearsystem-link |
 | GB | gambatte-dual |
 | GBC | gambatte-dual |
 | GBA | gpsp-link |
@@ -118,7 +118,7 @@ A note after `/` is the advice shown when a gpSP game is not linkable.
 | SEGACD | picodrive |
 | 32X | picodrive |
 | MS | gearsystem |
-| GG | gearsystem |
+| GG | gearsystem-link |
 | GB | gambatte-dual |
 | GBC | gambatte-dual |
 | GBA | armgba-together |
@@ -135,7 +135,7 @@ A note after `/` is the advice shown when a gpSP game is not linkable.
 | SEGACD | picodrive |
 | 32X | picodrive |
 | MS | gearsystem |
-| GG | gearsystem |
+| GG | gearsystem-link |
 | GB | gambatte-dual |
 | GBC | gambatte-dual |
 | GBA | armgba-separate |
@@ -152,7 +152,7 @@ A note after `/` is the advice shown when a gpSP game is not linkable.
 | SEGACD | picodrive |
 | 32X | picodrive |
 | MS | picodrive |
-| GG | picodrive |
+| GG | gearsystem-link |
 | GB | gambatte-dual |
 | GBC | gambatte-dual |
 | GBA | gpsp-link |
@@ -169,7 +169,7 @@ A note after `/` is the advice shown when a gpSP game is not linkable.
 | SEGACD | picodrive |
 | 32X | picodrive |
 | MS | picodrive |
-| GG | picodrive |
+| GG | gearsystem-link |
 | GB | gambatte-dual |
 | GBC | gambatte-dual |
 | GBA | gpsp-link |
@@ -186,7 +186,7 @@ A note after `/` is the advice shown when a gpSP game is not linkable.
 | SEGACD | picodrive |
 | 32X | picodrive |
 | MS | picodrive |
-| GG | picodrive |
+| GG | gearsystem-link |
 | GB | gambatte-dual |
 | GBC | gambatte-dual |
 | GBA | gpsp-link |
@@ -203,7 +203,7 @@ A note after `/` is the advice shown when a gpSP game is not linkable.
 | SEGACD | picodrive |
 | 32X | picodrive |
 | MS | gearsystem |
-| GG | gearsystem |
+| GG | gearsystem-link |
 | GB | gambatte-dual |
 | GBC | gambatte-dual |
 | GBA | armgba-separate |
@@ -220,7 +220,7 @@ A note after `/` is the advice shown when a gpSP game is not linkable.
 | SEGACD | picodrive |
 | 32X | picodrive |
 | MS | picodrive |
-| GG | picodrive |
+| GG | gearsystem-link |
 | GB | gambatte-dual |
 | GBC | gambatte-dual |
 | GBA | gpsp-link |
@@ -237,7 +237,7 @@ A note after `/` is the advice shown when a gpSP game is not linkable.
 | SEGACD | picodrive |
 | 32X | picodrive |
 | MS | picodrive |
-| GG | picodrive |
+| GG | gearsystem-link |
 | GB | gambatte-dual |
 | GBC | gambatte-dual |
 | GBA | gpsp-link |
@@ -254,7 +254,7 @@ A note after `/` is the advice shown when a gpSP game is not linkable.
 | SEGACD | picodrive |
 | 32X | picodrive |
 | MS | picodrive |
-| GG | picodrive |
+| GG | gearsystem-link |
 | GB | gambatte-dual |
 | GBC | gambatte-dual |
 | GBA | gpsp-link |
@@ -305,7 +305,7 @@ A note after `/` is the advice shown when a gpSP game is not linkable.
 | SEGACD | picodrive |
 | 32X | picodrive |
 | MS | picodrive |
-| GG | picodrive |
+| GG | gearsystem-link |
 | GB | gambatte-dual |
 | GBC | gambatte-dual |
 | GBA | gpsp-link |
@@ -339,7 +339,7 @@ A note after `/` is the advice shown when a gpSP game is not linkable.
 | SEGACD | picodrive |
 | 32X | picodrive |
 | MS | picodrive |
-| GG | picodrive |
+| GG | gearsystem-link |
 | GB | gambatte-dual |
 | GBC | gambatte-dual |
 | GBA | gpsp-link |
@@ -356,7 +356,7 @@ A note after `/` is the advice shown when a gpSP game is not linkable.
 | SEGACD | picodrive |
 | 32X | picodrive |
 | MS | picodrive |
-| GG | picodrive |
+| GG | gearsystem-link |
 | GB | gambatte-dual |
 | GBC | gambatte-dual |
 | GBA | gpsp-link |

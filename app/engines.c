@@ -22,10 +22,12 @@ static const NS_Engine ENGINES[] = {
 	{ "MS",     "genesis_plus_gx", "genesis_plus_gx",    NULL,       3, false, ENG_GATE_NONE },
 	{ "MS",     "gearsystem",      "gearsystem",         NULL,       1, true,  ENG_GATE_NONE },
 	{ "MS",     "picodrive",       "picodrive",          NULL,       1, true,  ENG_GATE_NONE },
-	/* Gear-to-Gear: Netplay's Gearsystem 3.9.25 build, both consoles and the
-	 * cable in one core, each device showing its own (64-bit devices only). */
-	{ "GG",     "gearsystem-link", "gearsystem",         "link",     1, false, ENG_GATE_NONE },
-	{ "GG",     "genesis_plus_gx", "genesis_plus_gx",    NULL,       3, false, ENG_GATE_NONE },
+	/* Game Gear is Gearsystem. First Gear-to-Gear: Netplay's Gearsystem
+	 * 3.9.25 build, both consoles and the cable in one core, each device
+	 * showing its own; its armv7 and AArch64 builds compute the same game and
+	 * load each other's states. Then the firmware's own Gearsystem, for a
+	 * peer without the link build; picodrive only where neither has one. */
+	{ "GG",     "gearsystem-link", "gearsystem",         "link",     1, true,  ENG_GATE_NONE },
 	{ "GG",     "gearsystem",      "gearsystem",         NULL,       1, true,  ENG_GATE_NONE },
 	{ "GG",     "picodrive",       "picodrive",          NULL,       1, true,  ENG_GATE_NONE },
 	{ "GB",     "gambatte-dual",   "gambatte",           "paired",   1, true,  ENG_GATE_NONE },

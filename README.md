@@ -67,7 +67,7 @@ choose cores. Every device and firmware pairing is worked out in
 | FC/NES, FDS | FCEUmm | Shared screen |
 | SFC/SNES | Supafaust, then Snes9x | Shared screen |
 | MD/Genesis, Sega CD, 32X | PicoDrive | Shared screen |
-| Game Gear | Gearsystem with Gear-to-Gear (Netplay's build, 64-bit devices), then Genesis Plus GX, Gearsystem, PicoDrive | Link cable (each player their own Game Gear), else shared screen |
+| Game Gear | Gearsystem with Gear-to-Gear (Netplay's build, every device), then Gearsystem, PicoDrive for older peers | Link cable (each player their own Game Gear), else shared screen |
 | Master System | Genesis Plus GX (64-bit spruce pairs), Gearsystem, then PicoDrive | Shared screen |
 | GB/GBC | Gambatte Dual, then Gambatte | Dual: both consoles on each device. Otherwise a link cable over the network |
 | GBA | armGBA Together (A30 and up), armGBA Separate, mGBA Dual (64-bit), then gpSP | See below |

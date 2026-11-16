@@ -74,7 +74,7 @@ Thirty paks. Seven use a core the shim drives; the rest launch stock.
 | 32X | picodrive | yes | no | **netplay** - untested |
 | FBN | fbneo | yes (arcade, 2+) | no | Stock only; Netplay does not wrap it |
 | FDS | fceumm | yes | no | **netplay** - untested |
-| GG | picodrive | no | **yes** in Netplay's Gearsystem (64-bit devices); stubbed in picodrive and Genesis Plus GX | **link** - Gear-to-Gear, see below |
+| GG | picodrive | no | **yes** in Netplay's Gearsystem (every device); stubbed in picodrive and Genesis Plus GX | **link** - Gear-to-Gear, see below |
 | SEGACD | picodrive | yes | no | **netplay** - untested |
 | SG1000 | picodrive | yes | no | **netplay** - untested |
 | SMS | picodrive | yes | no | **netplay** - untested |
@@ -261,7 +261,7 @@ system, the same on both devices, whatever firmware each runs.
 | FC, FDS | FCEUmm |
 | SFC | Supafaust, then Snes9x |
 | MD, SEGACD, 32X | PicoDrive |
-| GG | Gearsystem link (Netplay's build, 64-bit devices), Genesis Plus GX (3; 64-bit pairs only), Gearsystem, PicoDrive |
+| GG | Gearsystem link (Netplay's build, every device), Gearsystem (the firmware's, for a peer without the link build), PicoDrive |
 | MS | Genesis Plus GX (3; 64-bit pairs only), Gearsystem, PicoDrive |
 | GB, GBC | Gambatte Dual, then Gambatte link |
 | GBA | armGBA Together (2), armGBA Separate, mGBA Dual (3), gpSP link |
@@ -293,15 +293,23 @@ Gear-to-Gear to its libretro core in the same shape as the paired Gambatte:
 two Game Gears and the cable between them inside one core, pad 1 playing
 console 1 and pad 2 console 2, one state holding both. Netplay ships its own
 3.9.25 build (`gearsystem_link_libretro.so`, `make cores-gearsystem`, one
-AArch64 binary for every 64-bit device) and runs it as an ordinary
+AArch64 binary for every 64-bit device and one armv7 binary, in the my282
+override folder, for the 32-bit ones) and runs it as an ordinary
 shared-screen lockstep session - both devices run both consoles - in which the
 shim switches the link on and has each device show and hear its own console:
 the host console 1, the guest console 2. A patch
 (`cores/patches/gearsystem-001-linked-console-ram.patch`) exposes console 2's
 work RAM so the periodic state check covers both consoles. Engine
-`gearsystem-link` heads the GG ladder; a pair without it (a 32-bit device)
-falls back to shared screen, where the link port is empty. Device-tested on
-two spruce devices (Brick and RG35XXH) with OutRun's VERSUS HUMAN
+`gearsystem-link` heads the GG ladder for every pair, mixed word sizes
+included: the armv7, AArch64 and x86-64 builds hashed identically (both
+consoles' RAM, the frame and the audio, every 300 frames) over 18,000 frames
+of a linked OutRun race under qemu, and a state saved by either ARM build
+loads into the other and plays on to the same hashes. A 64-bit spruce device
+facing a 32-bit one loads the armv7 build under its 32-bit RetroArch. Only a
+peer without the link build (an older Netplay) falls back to plain
+Gearsystem, then PicoDrive, where the link port is empty. Genesis Plus GX is
+not used for Game Gear. Device-tested on two 64-bit spruce devices (Brick and
+RG35XXH) with OutRun's VERSUS HUMAN
 (`testing/devbridge/gg-outrun.test`).
 
 picodrive and Genesis Plus GX cannot do this. picodrive's Game Gear I/O area is

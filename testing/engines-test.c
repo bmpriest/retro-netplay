@@ -28,11 +28,11 @@ typedef struct {
 
 static const Profile PROFILES[] = {
 	{ "spruce 64-bit",          3, "64+32", SPRUCE_CORES ",gearsystem-link", "" },
-	{ "spruce A30",             2, "32",    SPRUCE_CORES, "" },
-	{ "spruce Mini",            1, "32",    SPRUCE_CORES, "" },
+	{ "spruce A30",             2, "32",    SPRUCE_CORES ",gearsystem-link", "" },
+	{ "spruce Mini",            1, "32",    SPRUCE_CORES ",gearsystem-link", "" },
 	{ "NextUI 64-bit",          3, "64",    NEXTUI_CORES ",gearsystem-link", "mgba-dual" },
 	{ "NextUI 64-bit + mGBA",   3, "64",    NEXTUI_CORES ",gearsystem-link,mgba-dual", "" },
-	{ "NextUI A30",             2, "32",    "fceumm,supafaust,picodrive,gambatte-dual,gambatte-link,gpsp-link,pcsx_rearmed", "" },
+	{ "NextUI A30",             2, "32",    "fceumm,supafaust,picodrive,gambatte-dual,gambatte-link,gpsp-link,pcsx_rearmed,gearsystem-link", "" },
 };
 #define PROFILE_COUNT ((int)(sizeof(PROFILES) / sizeof(PROFILES[0])))
 
@@ -95,12 +95,14 @@ int main(int argc, char** argv) {
 	printf("== same-firmware pairs follow the tiers\n");
 	expect("spruce 64-bit", "spruce 64-bit", "MS", "genesis_plus_gx", "");
 	expect("spruce 64-bit", "spruce A30", "MS", "gearsystem", "");
-	/* Gear-to-Gear: Netplay's own Gearsystem on every 64-bit device. */
+	/* Gear-to-Gear: Netplay's own Gearsystem on every device, either word size. */
 	expect("spruce 64-bit", "spruce 64-bit", "GG", "gearsystem-link", "");
 	expect("spruce 64-bit", "NextUI 64-bit", "GG", "gearsystem-link", "");
 	expect("NextUI 64-bit", "NextUI 64-bit", "GG", "gearsystem-link", "");
-	expect("spruce 64-bit", "spruce A30", "GG", "gearsystem", "");
-	expect("NextUI 64-bit", "NextUI A30", "GG", "picodrive", "");
+	expect("spruce 64-bit", "spruce A30", "GG", "gearsystem-link", "");
+	expect("NextUI 64-bit", "NextUI A30", "GG", "gearsystem-link", "");
+	expect("spruce Mini", "NextUI 64-bit", "GG", "gearsystem-link", "");
+	expect("NextUI A30", "NextUI A30", "GG", "gearsystem-link", "");
 	expect("spruce A30", "spruce Mini", "GBA", "armgba-separate", "");
 	expect("spruce 64-bit", "spruce A30", "GBA", "armgba-together", "");
 	expect("spruce Mini", "spruce Mini", "SFC", "supafaust", "");
